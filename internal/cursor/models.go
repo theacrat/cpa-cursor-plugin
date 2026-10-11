@@ -14,14 +14,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Config is deliberately transport-only. Auth parsing, defaults and endpoint
-// selection belong to the auth agent and are copied here by the parent.
-type Config struct {
-	Enabled                                            bool
-	APIBaseURL, LoginURL, AgentBaseURL, ClientVersion  string
-	RequestTimeout, LoginTimeout, MaxConcurrentStreams int
-}
-
 func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelRequest) (pluginapi.ModelResponse, error) {
 	if !e.cfg.Enabled {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor provider is disabled")
