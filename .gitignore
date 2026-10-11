@@ -1,0 +1,6 @@
+/dist/
+/coverage.out
+*.so
+*.dylib
+*.test
+*.prof
