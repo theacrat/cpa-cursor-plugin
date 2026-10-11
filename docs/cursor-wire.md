@@ -6,7 +6,7 @@ release `2026.10.01-e373342` independently confirms BidiAppend fields, RunSSE,
 the current client version, and the AiService discovery route.
 
 When CPA provides `HostHTTPClient`, inference uses Connect server streaming at
-`AgentBaseURL/agent.v1.AgentService/RunSSE`, and serial unary writes at
+`APIBaseURL/agent.v1.AgentService/RunSSE`, and serial unary writes at
 `APIBaseURL/aiserver.v1.BidiService/BidiAppend`. The request ID is shared across
 both routes; append sequence numbers start at zero. This keeps host proxy,
 request logging and cancellation policy. The streaming input is a single

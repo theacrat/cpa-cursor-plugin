@@ -26,7 +26,7 @@ import (
 var _ pluginapi.ProviderExecutor = (*Executor)(nil)
 
 func testRequest() pluginapi.ExecutorRequest {
-	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"access_token":"fixture-secret","selected_team_id":"team"}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
+	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"access_token":"fixture-secret","selected_team_id":123}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
 }
 func writeServer(t *testing.T, w http.ResponseWriter, msg *pb.AgentServerMessage) {
 	t.Helper()
@@ -76,7 +76,7 @@ func TestNativeHTTP2Duplex(t *testing.T) {
 		if r.ProtoMajor != 2 || r.URL.Path != "/agent.v1.AgentService/Run" {
 			t.Errorf("wrong transport %s %s", r.Proto, r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer fixture-secret" || r.Header.Get("X-Cursor-Team-Id") != "team" {
+		if r.Header.Get("Authorization") != "Bearer fixture-secret" || r.Header.Get("X-Cursor-Team-Id") != "123" {
 			t.Error("missing credential headers")
 		}
 		initial := readClient(t, r.Body).GetRunRequest()

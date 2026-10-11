@@ -344,9 +344,6 @@ func cgoCallHost(method string, payload any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("decode host callback envelope %s: %w", method, err)
 	}
 	if !env.OK {
-		if env.Error != nil {
-			return nil, fmt.Errorf("%s", env.Error.Message)
-		}
 		return nil, fmt.Errorf("host callback %s failed", method)
 	}
 	if callCode != 0 {

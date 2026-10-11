@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,9 +50,9 @@ func (e *Executor) headers(storage []byte, metadata map[string]any, stream bool,
 	h := http.Header{"Authorization": []string{"Bearer " + token}, "Connect-Protocol-Version": []string{"1"}, "X-Ghost-Mode": []string{"true"}, "X-Cursor-Client-Version": []string{version}, "X-Cursor-Client-Type": []string{"cli"}, "X-Request-Id": []string{id}, "Content-Type": []string{"application/proto"}}
 	var data map[string]any
 	_ = json.Unmarshal(storage, &data)
-	team, _ := data["selected_team_id"].(string)
+	team := teamHeader(data["selected_team_id"])
 	if team == "" {
-		team, _ = metadata["selected_team_id"].(string)
+		team = teamHeader(metadata["selected_team_id"])
 	}
 	if team != "" {
 		if strings.ContainsAny(team, "\r\n") {
@@ -64,6 +65,24 @@ func (e *Executor) headers(storage []byte, metadata map[string]any, stream bool,
 		h.Set("Connect-Accept-Encoding", "gzip")
 	}
 	return h, nil
+}
+
+func teamHeader(value any) string {
+	switch v := value.(type) {
+	case float64:
+		if v > 0 && v <= 9007199254740991 && v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+	case int64:
+		if v > 0 {
+			return strconv.FormatInt(v, 10)
+		}
+	case string:
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return strconv.FormatInt(n, 10)
+		}
+	}
+	return ""
 }
 func frameMessage(m proto.Message) ([]byte, error) {
 	raw, err := proto.Marshal(m)
@@ -130,7 +149,7 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 			cancel()
 		}
 	}()
-	base := e.cfg.AgentBaseURL
+	base := e.cfg.APIBaseURL
 	if base == "" {
 		base = "https://api2.cursor.sh"
 	}

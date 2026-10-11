@@ -221,6 +221,25 @@ func TestLoginPollFailuresAreRedacted(t *testing.T) {
 	}
 }
 
+func TestPollUsesVerifierQueryRequiredByCursor(t *testing.T) {
+	s, _ := fixtureService(t)
+	start, _ := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})
+	client := fakeHTTP{do: func(_ context.Context, req pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		u, err := url.Parse(req.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.Query().Get("verifier") == "" || u.Query().Get("uuid") == "" {
+			t.Fatal("Cursor poll identifiers missing")
+		}
+		return pluginapi.HTTPResponse{StatusCode: 404}, nil
+	}}
+	result, err := s.PollLogin(context.Background(), pluginapi.AuthLoginPollRequest{State: start.State, HTTPClient: client})
+	if err != nil || result.Status != pluginapi.AuthLoginStatusPending {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
 func TestLoginPollStopsAfterThreeFailures(t *testing.T) {
 	s, now := fixtureService(t)
 	start, _ := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})

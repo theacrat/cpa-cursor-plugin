@@ -22,6 +22,8 @@ The current official CLI exchanges dashboard API keys at `/auth/exchange_user_ap
 
 Reject unsupported provider records and malformed credentials. Never include upstream response bodies, tokens or PKCE verifiers in errors. Validate endpoint origins and prohibit credential-bearing arbitrary HTTP forwarding. Bound login sessions, response sizes, Connect frames and concurrent streams. Cancel upstream runs before unload, drain dispatch before replacing configuration, and prevent callbacks after shutdown. Do not execute model-requested local filesystem or shell operations inside the plugin: return client tool calls or reject unavailable operations.
 
+Cursor requires the PKCE verifier as an auth-poll query parameter. CPA v7.3.20 records upstream URLs verbatim when request logging is enabled and does not expose per-request redaction. Consequently request logs are sensitive credential material; disable request logging during login or secure and remove those logs. The plugin cannot promise verifier-free host logs. Native host callbacks must return on cancellation: if a broken host blocks inside C, safe unload must wait rather than abandon a callback into unmapped plugin code.
+
 ## Verification
 
 Deterministic fixtures cover login pending/success/expiry/replay, refresh rotation and identity preservation, authenticated discovery, conversation/tool conversion, fragmented and compressed Connect frames, upstream errors, stream close/cancellation, reload and shutdown. Gate changes with gofmt, go vet, CGO-off tests, CGO race tests, and a native C loader exercising the real exported ABI. CI builds supported target libraries and release bundles. A real account end-to-end check is separate from fixture verification and is not claimed without explicit evidence.
