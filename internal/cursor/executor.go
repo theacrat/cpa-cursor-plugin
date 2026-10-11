@@ -136,6 +136,9 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
 	chunks := make(chan pluginapi.ExecutorStreamChunk, 8)
+	ready := make(chan error, 1)
+	var readyOnce sync.Once
+	admit := func(err error) { readyOnce.Do(func() { ready <- err }) }
 	go func() {
 		defer release()
 		defer close(chunks)
@@ -155,10 +158,15 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 			raw, _ := json.Marshal(body)
 			return send(pluginapi.ExecutorStreamChunk{Payload: append(append([]byte("data: "), raw...), []byte("\n\n")...)})
 		}
-		if err := emit(map[string]any{"role": "assistant"}, nil, nil); err != nil {
-			return
-		}
+		started := false
 		result, err := e.run(ctx, req, built, func(text string, thinking bool) error {
+			if !started {
+				started = true
+				admit(nil)
+				if err := emit(map[string]any{"role": "assistant"}, nil, nil); err != nil {
+					return err
+				}
+			}
 			key := "content"
 			if thinking {
 				key = "reasoning_content"
@@ -166,8 +174,15 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 			return emit(map[string]any{key: text}, nil, nil)
 		})
 		if err != nil {
+			admit(err)
 			_ = send(pluginapi.ExecutorStreamChunk{Err: err})
 			return
+		}
+		if !started {
+			admit(nil)
+			if err := emit(map[string]any{"role": "assistant"}, nil, nil); err != nil {
+				return
+			}
 		}
 		reason := "stop"
 		if len(result.calls) > 0 {
@@ -183,5 +198,10 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		}
 		_ = send(pluginapi.ExecutorStreamChunk{Payload: []byte("data: [DONE]\n\n")})
 	}()
+	if err := <-ready; err != nil {
+		for range chunks {
+		}
+		return pluginapi.ExecutorStreamResponse{}, err
+	}
 	return pluginapi.ExecutorStreamResponse{Headers: http.Header{"Content-Type": []string{"text/event-stream"}}, Chunks: chunks}, nil
 }

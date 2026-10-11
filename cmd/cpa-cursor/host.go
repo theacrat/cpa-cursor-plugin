@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -14,7 +15,10 @@ var callHost = func(string, any) (json.RawMessage, error) {
 	return nil, errors.New("host callback is not available")
 }
 
-type hostHTTP struct{ callbackID string }
+type hostHTTP struct {
+	callbackID string
+	workers    *sync.WaitGroup
+}
 
 type hostRequest struct {
 	pluginapi.HTTPRequest
@@ -97,7 +101,13 @@ func (h hostHTTP) DoStream(ctx context.Context, req pluginapi.HTTPRequest) (plug
 		return pluginapi.HTTPStreamResponse{}, errors.New("host returned empty HTTP stream")
 	}
 	chunks := make(chan pluginapi.HTTPStreamChunk)
+	if h.workers != nil {
+		h.workers.Add(1)
+	}
 	go func() {
+		if h.workers != nil {
+			defer h.workers.Done()
+		}
 		defer close(chunks)
 		defer stop()
 		defer func() {

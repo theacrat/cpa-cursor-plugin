@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -196,12 +195,6 @@ func normaliseQuota(u usageResponse) (pluginapi.QuotaFetchResponse, error) {
 			return r, errors.New("invalid cursor quota billing date")
 		}
 	}
-	if u.MembershipType != "" {
-		if len(u.MembershipType) > 128 || strings.ContainsAny(u.MembershipType, "\r\n") {
-			return r, errors.New("invalid cursor quota membership")
-		}
-		r.Subscription = &pluginapi.QuotaSubscription{Plan: u.MembershipType}
-	}
 	reset := timestamp(u.BillingCycleEnd)
 	if u.PlanUsage != nil {
 		g := pluginapi.QuotaGroup{DisplayName: "Plan"}
@@ -224,6 +217,9 @@ func normaliseQuota(u usageResponse) (pluginapi.QuotaFetchResponse, error) {
 			key, label string
 			n          quotaNumber
 		}{{"total_spend", "Plan spend", p.TotalSpend}, {"included_spend", "Included spend", p.IncludedSpend}, {"bonus_spend", "Bonus spend", p.BonusSpend}, {"remaining", "Plan remaining", p.Remaining}, {"limit", "Plan limit", p.Limit}, {"auto_spend", "Auto spend", p.AutoSpend}, {"api_spend", "API spend", p.APISpend}, {"auto_limit", "Auto limit", p.AutoLimit}, {"api_limit", "API limit", p.APILimit}} {
+			if field.n.Set && !field.n.Null && !validMoney(field.n) {
+				return r, errors.New("invalid cursor quota amount")
+			}
 			if field.key == "remaining" && p.Limit.Null {
 				continue
 			}
@@ -234,6 +230,16 @@ func normaliseQuota(u usageResponse) (pluginapi.QuotaFetchResponse, error) {
 		if !validPercent(p.TotalPercentUsed) {
 			if b, ok := amountBucket("plan", p.TotalSpend, p.Limit, p.Remaining, reset); ok {
 				g.Buckets = append(g.Buckets, b)
+			}
+		}
+		for _, field := range []struct {
+			name                 string
+			percent, used, limit quotaNumber
+		}{{"auto", p.AutoPercentUsed, p.AutoSpend, p.AutoLimit}, {"api", p.APIPercentUsed, p.APISpend, p.APILimit}} {
+			if !validPercent(field.percent) {
+				if b, ok := amountBucket(field.name, field.used, field.limit, quotaNumber{}, reset); ok {
+					g.Buckets = append(g.Buckets, b)
+				}
 			}
 		}
 		if len(g.Buckets) > 0 {
@@ -247,6 +253,9 @@ func normaliseQuota(u usageResponse) (pluginapi.QuotaFetchResponse, error) {
 			key, label string
 			n          quotaNumber
 		}{{"total_spend", "On-demand spend", s.TotalSpend}, {"pooled_limit", "Pooled limit", s.PooledLimit}, {"pooled_used", "Pooled spend", s.PooledUsed}, {"pooled_remaining", "Pooled remaining", s.PooledRemaining}, {"individual_limit", "Individual limit", s.IndividualLimit}, {"individual_used", "Individual spend", s.IndividualUsed}, {"individual_remaining", "Individual remaining", s.IndividualRemaining}, {"overall_limit", "Overall limit", s.OverallLimit}, {"overall_used", "Overall spend", s.OverallUsed}, {"overall_remaining", "Overall remaining", s.OverallRemaining}} {
+			if field.n.Set && !field.n.Null && !validMoney(field.n) {
+				return r, errors.New("invalid cursor quota amount")
+			}
 			if field.key == "pooled_remaining" && s.PooledLimit.Null || field.key == "individual_remaining" && s.IndividualLimit.Null || field.key == "overall_remaining" && s.OverallLimit.Null {
 				continue
 			}

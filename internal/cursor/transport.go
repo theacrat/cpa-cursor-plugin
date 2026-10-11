@@ -273,6 +273,8 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 		_ = pr.Close()
 		_ = pw.Close()
 	}
+	stopCleanup := context.AfterFunc(ctx, cleanup)
+	closeTransport := func() { stopCleanup(); cleanup() }
 	if resp.ProtoMajor != 2 {
 		cleanup()
 		<-initialDone
@@ -297,5 +299,5 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 		defer mu.Unlock()
 		_, err = pw.Write(raw)
 		return err
-	}, close: cleanup}, nil
+	}, close: closeTransport}, nil
 }

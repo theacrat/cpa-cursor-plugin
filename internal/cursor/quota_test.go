@@ -68,6 +68,24 @@ func TestQuotaPartialNullAndZero(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaRejectsNegativeAmountsEvenWhenLimitUnknown(t *testing.T) {
+	for _, body := range []string{`{"planUsage":{"remaining":-1}}`, `{"spendLimitUsage":{"overallRemaining":-1}}`} {
+		if _, err := NewQuotaService(DefaultConfig()).FetchQuota(context.Background(), quotaRequest(body, 200)); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestQuotaDerivesOptionalAutoAndAPIBuckets(t *testing.T) {
+	r, err := NewQuotaService(DefaultConfig()).FetchQuota(context.Background(), quotaRequest(`{"planUsage":{"autoSpend":500,"autoLimit":2000,"apiSpend":200,"apiLimit":1000}}`, 200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Groups) != 1 || len(r.Groups[0].Buckets) != 2 || r.Groups[0].Buckets[0].RemainingFraction != .75 || r.Groups[0].Buckets[1].RemainingFraction != .8 {
+		t.Fatalf("%#v", r)
+	}
+}
 func TestQuotaRejectsMalformed(t *testing.T) {
 	for _, body := range []string{`{}`, `null`, `[]`, `{"enabled":true}`, `{"planUsage":{"totalPercentUsed":101}}`, `{"planUsage":{"totalPercentUsed":-1}}`, `{"planUsage":{"limit":-1}}`, `{"planUsage":{"includedSpend":"bad-secret"}}`, `{"planUsage":{"totalPercentUsed":1e999}}`, `{"billingCycleEnd":"bad-secret","planUsage":{"limit":0}}`, `{"planUsage":true}`, strings.Repeat(" ", maxJSONResponseBytes+1)} {
 		_, err := NewQuotaService(DefaultConfig()).FetchQuota(context.Background(), quotaRequest(body, 200))

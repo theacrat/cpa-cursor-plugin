@@ -14,16 +14,17 @@ import (
 const pluginIdentifier = "cpa-cursor"
 
 type Plugin struct {
-	mu       sync.Mutex
-	shutdown bool
-	quiesced bool
-	cfg      cursor.Config
-	auth     *cursor.AuthService
-	executor *cursor.Executor
-	quota    *cursor.QuotaService
-	ctx      context.Context
-	cancel   context.CancelFunc
-	workers  sync.WaitGroup
+	mu          sync.Mutex
+	shutdown    bool
+	quiesced    bool
+	cfg         cursor.Config
+	auth        *cursor.AuthService
+	executor    *cursor.Executor
+	quota       *cursor.QuotaService
+	ctx         context.Context
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
+	hostWorkers sync.WaitGroup
 }
 
 func NewPlugin() *Plugin {
@@ -52,6 +53,7 @@ func (p *Plugin) ApplyLifecycle(raw []byte) error {
 	p.auth.Close()
 	p.executor.Close()
 	p.workers.Wait()
+	p.hostWorkers.Wait()
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.cfg = cfg
 	p.auth = cursor.NewAuthService(cfg)
@@ -70,6 +72,7 @@ func (p *Plugin) stop(final bool) {
 	p.auth.Close()
 	p.executor.Close()
 	p.workers.Wait()
+	p.hostWorkers.Wait()
 }
 
 func (p *Plugin) Shutdown() { p.stop(true) }
@@ -99,7 +102,7 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 	if len(raw) > 0 && json.Unmarshal(raw, &wire) != nil {
 		return nil, errors.New("invalid request JSON")
 	}
-	client := hostHTTP{callbackID: wire.CallbackID}
+	client := hostHTTP{callbackID: wire.CallbackID, workers: &p.hostWorkers}
 	switch method {
 	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return map[string]string{"identifier": "cursor"}, nil
