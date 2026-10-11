@@ -1,0 +1,59 @@
+[tools]
+go = "1.27.1"
+zig = "0.17.0"
+
+[tasks.fmt]
+description = "Format all Go source"
+run = "gofmt -w ."
+
+[tasks.fmt-check]
+description = "Check Go formatting without changing files"
+run = "bash scripts/check-format.sh"
+
+[tasks.scripts-check]
+description = "Check shell and Python helper syntax without generating files"
+run = "bash scripts/check-scripts.sh"
+
+[tasks.vet]
+description = "Run Go static analysis, including the CGO entrypoint"
+run = "CGO_ENABLED=1 go vet ./..."
+
+[tasks.test]
+description = "Test pure Go packages without CGO"
+run = "CGO_ENABLED=0 go test ./..."
+
+[tasks.test-race]
+description = "Test with CGO, race detection and coverage"
+run = "CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./..."
+
+[tasks.test-abi]
+description = "Build and smoke-test the native C ABI without network requests"
+run = "bash scripts/abi-smoke.sh"
+
+[tasks.check]
+description = "Check formatting, helper syntax, static analysis and all test modes"
+run = "bash scripts/check.sh"
+
+[tasks.hooks]
+description = "Enable repository pre-commit checks"
+run = "git config --local core.hooksPath .githooks"
+
+[tasks.build]
+description = "Build a shared plugin for the current OS and architecture"
+run = "bash scripts/build.sh"
+
+[tasks.build-linux-arm64]
+description = "Build Linux ARM64 with the native compiler or Zig"
+run = "bash scripts/build.sh linux arm64"
+
+[tasks.build-linux-amd64]
+description = "Build Linux AMD64 with the native compiler or Zig"
+run = "bash scripts/build.sh linux amd64"
+
+[tasks.build-darwin-arm64]
+description = "Build macOS ARM64 (requires a macOS host and SDK)"
+run = "bash scripts/build.sh darwin arm64"
+
+[tasks.build-darwin-amd64]
+description = "Build macOS AMD64 (requires a macOS host and SDK)"
+run = "bash scripts/build.sh darwin amd64"

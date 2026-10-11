@@ -1,0 +1,12 @@
+agent.proto is derived from pi-cursor (MIT), https://github.com/Rahularya01/pi-cursor
+at commit ef3cafb5c38081ce6e06df8e594241aabd9621e3.
+The original copyright and permission notice is in LICENSE.pi-cursor.
+internal/proto/agent.pb.go is generated from this schema and retains this attribution.
+Some top-level message names ending in _Approved, _Rejected, _BlobIdWithData,
+_SlackThread and _IdeState have a Message suffix to avoid Go oneof wrapper
+identifier collisions. Field numbers, field types and wire encoding are unchanged.
+Protocol handling and prompt publication are informed by that project's MIT-licensed
+request-build.ts, root-prompt.ts, server-messages.ts and h2-session.ts.
+
+Regenerate (protoc and protoc-gen-go required):
+protoc --go_out=. --go_opt=module=github.com/theacrat/cpa-cursor-plugin proto/agent.proto

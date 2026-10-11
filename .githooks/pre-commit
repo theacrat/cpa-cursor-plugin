@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+if ! command -v mise >/dev/null 2>&1; then
+  printf 'pre-commit requires mise; install it and run mise install.\n' >&2
+  exit 1
+fi
+# Checks never format or stage files on the author's behalf.
+exec mise run check
