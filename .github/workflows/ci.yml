@@ -1,0 +1,61 @@
+name: Go checks and shared libraries
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.1.1
+      - run: mise run check
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
+          if-no-files-found: error
+
+  cross-builds:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.1.1
+      - name: Build all shared libraries
+        run: |
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            mise run "build-$target"
+          done
+      - name: Smoke-test native host ABI
+        run: mise exec -- bash scripts/abi-smoke.sh "$PWD/dist/darwin-$(mise exec -- go env GOHOSTARCH)/cpa-cursor.dylib"
+      - name: Verify cross-built architectures and headers
+        run: |
+          file dist/linux-amd64/cpa-cursor.so | grep -E 'ELF 64-bit.*shared object.*x86-64'
+          file dist/linux-arm64/cpa-cursor.so | grep -E 'ELF 64-bit.*shared object.*ARM aarch64'
+          lipo dist/darwin-amd64/cpa-cursor.dylib -verify_arch x86_64
+          lipo dist/darwin-arm64/cpa-cursor.dylib -verify_arch arm64
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            test -s "dist/$target/cpa-cursor.h"
+          done
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: cpa-cursor
+          path: |
+            dist/linux-amd64/
+            dist/linux-arm64/
+            dist/darwin-amd64/
+            dist/darwin-arm64/
+          if-no-files-found: error
