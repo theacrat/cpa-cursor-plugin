@@ -59,17 +59,17 @@ import "C"
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/theacrat/cpa-cursor-plugin/internal/cursor"
 )
 
-// Lifecycle changes are exclusive, but dispatch leases are concurrent: model
-// registration can call the host's HTTP endpoint, which re-enters interception.
-// Closing admission must reject (not block) that re-entry while draining.
+// Lifecycle changes close admission, cancel upstream operations, then drain
+// dispatch and async stream workers before replacing the instance.
 var abiLifecycleMu sync.Mutex
 var dispatchMu sync.Mutex
 var dispatchCond = sync.NewCond(&dispatchMu)
@@ -125,11 +125,12 @@ func init() {
 
 //export cliproxy_plugin_init
 func cliproxy_plugin_init(host *C.cliproxy_host_api, out *C.cliproxy_plugin_api) C.int {
-	if out == nil {
+	if out == nil || host == nil || host.abi_version != C.uint32_t(pluginabi.ABIVersion) || host.call == nil || host.free_buffer == nil {
 		return 1
 	}
 	abiLifecycleMu.Lock()
 	defer abiLifecycleMu.Unlock()
+	plugin.cancel()
 	drainDispatch()
 	plugin.Shutdown()
 	hostMu.Lock()
@@ -148,8 +149,8 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, out *C.cliproxy_plugin_api)
 //export cliproxyPluginCall
 func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t, response *C.cliproxy_buffer) (ret C.int) {
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			writeResponse(response, errorEnvelope("plugin_panic", fmt.Sprintf("%v", recovered)))
+		if recover() != nil {
+			writeResponse(response, errorEnvelope("plugin_panic", "plugin encountered an internal error"))
 			ret = 1
 		}
 	}()
@@ -159,6 +160,10 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	}
 	if method == nil {
 		writeResponse(response, errorEnvelope("invalid_method", "method is required"))
+		return 1
+	}
+	if requestLen > 32<<20 || (requestLen > 0 && request == nil) {
+		writeResponse(response, errorEnvelope("invalid_request", "invalid or oversized request buffer"))
 		return 1
 	}
 	var requestBytes []byte
@@ -185,6 +190,7 @@ func cliproxyPluginFree(ptr unsafe.Pointer, _ C.size_t) {
 func cliproxyPluginShutdown() {
 	abiLifecycleMu.Lock()
 	defer abiLifecycleMu.Unlock()
+	plugin.cancel()
 	drainDispatch()
 	plugin.Shutdown()
 	stopHostCallbacks()
@@ -198,6 +204,16 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
 		abiLifecycleMu.Lock()
 		defer abiLifecycleMu.Unlock()
+		var config struct {
+			ConfigYAML []byte `json:"config_yaml"`
+		}
+		if len(request) > 0 && json.Unmarshal(request, &config) != nil {
+			return errorEnvelope("invalid_config", "invalid lifecycle request"), nil
+		}
+		if _, err := cursor.ParseConfig(config.ConfigYAML); err != nil {
+			return errorEnvelope("invalid_config", err.Error()), nil
+		}
+		plugin.cancel()
 		drainDispatch()
 		plugin.mu.Lock()
 		shutdown := plugin.shutdown
@@ -217,6 +233,7 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodPluginShutdown:
 		abiLifecycleMu.Lock()
 		defer abiLifecycleMu.Unlock()
+		plugin.cancel()
 		drainDispatch()
 		plugin.Shutdown()
 		stopHostCallbacks()
@@ -224,6 +241,7 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodPluginQuiesce:
 		abiLifecycleMu.Lock()
 		defer abiLifecycleMu.Unlock()
+		plugin.cancel()
 		drainDispatch()
 		plugin.Quiesce()
 		stopHostCallbacks()
@@ -231,39 +249,26 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	}
 	p, admitted := acquireDispatch()
 	if !admitted {
-		switch method {
-		case pluginabi.MethodModelRegister:
-			return okEnvelope(pluginapi.ModelRegistrationResponse{})
-		case pluginabi.MethodResponseInterceptAfter:
-			return okEnvelope(pluginapi.ResponseInterceptResponse{})
-		default:
-			return errorEnvelope("plugin_shutdown", "plugin dispatch is stopped"), nil
-		}
+		return errorEnvelope("plugin_shutdown", "plugin dispatch is stopped"), nil
 	}
 	defer releaseDispatch()
-	switch method {
-	case pluginabi.MethodModelRegister:
-		if p.inactive() {
-			return okEnvelope(pluginapi.ModelRegistrationResponse{})
+	value, err := p.dispatch(method, request)
+	if err != nil {
+		var upstream *pluginabi.Error
+		if errors.As(err, &upstream) {
+			return json.Marshal(pluginabi.Envelope{OK: false, Error: upstream})
 		}
-		return okEnvelope(p.RegisterModels())
-	case pluginabi.MethodResponseInterceptAfter:
-		if p.inactive() {
-			return okEnvelope(pluginapi.ResponseInterceptResponse{})
+		var status interface{ StatusCode() int }
+		if errors.As(err, &status) {
+			return json.Marshal(pluginabi.Envelope{OK: false, Error: pluginabi.NewError("upstream_error", err.Error(), status.StatusCode())})
 		}
-		var req pluginapi.ResponseInterceptRequest
-		if len(request) > 0 {
-			if err := json.Unmarshal(request, &req); err != nil {
-				return errorEnvelope("invalid_request", err.Error()), nil
-			}
+		var authStatus *cursor.HTTPStatusError
+		if errors.As(err, &authStatus) {
+			return json.Marshal(pluginabi.Envelope{OK: false, Error: pluginabi.NewError("upstream_error", err.Error(), authStatus.StatusCode)})
 		}
-		if isInternalDiscovery(req.RequestHeaders) {
-			return okEnvelope(pluginapi.ResponseInterceptResponse{})
-		}
-		return okEnvelope(p.InterceptResponse(req))
-	default:
-		return errorEnvelope("unknown_method", "unknown method: "+method), nil
+		return errorEnvelope("plugin_error", err.Error()), nil
 	}
+	return okEnvelope(value)
 }
 
 func okEnvelope(value any) ([]byte, error) {
@@ -322,6 +327,10 @@ func cgoCallHost(method string, payload any) (json.RawMessage, error) {
 	callCode := C.call_host_api(cMethod, requestPtr, C.size_t(len(rawPayload)), &response)
 	var rawResponse []byte
 	if response.ptr != nil && response.len > 0 {
+		if response.len > 32<<20 {
+			C.free_host_buffer(response.ptr, response.len)
+			return nil, fmt.Errorf("host callback response exceeds size limit")
+		}
 		rawResponse = C.GoBytes(response.ptr, C.int(response.len))
 	}
 	if response.ptr != nil {

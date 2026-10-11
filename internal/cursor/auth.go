@@ -269,6 +269,8 @@ func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	if email := stringField(m, "email"); email != "" {
 		a.Metadata["email"] = email
 	}
+	a.Attributes["auth_kind"] = "oauth"
+	a.Metadata["auth_kind"] = "oauth"
 	return a, nil
 }
 
@@ -374,7 +376,7 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	u, _ := url.Parse(strings.TrimRight(cfg.APIBaseURL, "/") + "/auth/poll")
 	u.RawQuery = url.Values{"uuid": {session.uuid}, "verifier": {session.verifier}}.Encode()
 	var tokens tokenResponse
-	err = DoJSON(ctx, req.HTTPClient, pluginapi.HTTPRequest{Method: http.MethodGet, URL: u.String()}, time.Duration(cfg.RequestTimeout)*time.Second, &tokens)
+	err = DoJSON(ctx, req.HTTPClient, pluginapi.HTTPRequest{Method: http.MethodGet, URL: u.String(), Headers: http.Header{"Content-Type": {"application/json"}}}, time.Duration(cfg.RequestTimeout)*time.Second, &tokens)
 	var status *HTTPStatusError
 	if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
 		return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}, nil
