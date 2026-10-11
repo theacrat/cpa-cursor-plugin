@@ -2,7 +2,6 @@ package cursor
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,10 +20,11 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if req.HTTPClient == nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor model discovery requires the host HTTP client")
 	}
-	token, err := executorToken(req.StorageJSON, req.Metadata)
+	ctx, release, err := e.lease(ctx)
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, err
 	}
+	defer release()
 	base := e.cfg.APIBaseURL
 	if base == "" {
 		base = "https://api2.cursor.sh"
@@ -33,9 +33,9 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, err
 	}
-	h := http.Header{"Authorization": []string{"Bearer " + token}, "Content-Type": []string{"application/proto"}, "X-Cursor-Client-Version": []string{e.cfg.ClientVersion}, "X-Cursor-Client-Type": []string{"cli"}}
-	if team, _ := req.Metadata["selected_team_id"].(string); team != "" {
-		h.Set("X-Cursor-Team-Id", team)
+	h, err := e.headers(req.StorageJSON, req.Metadata, false, uuid())
+	if err != nil {
+		return pluginapi.ModelResponse{Provider: "cursor"}, err
 	}
 	body, _ := proto.Marshal(&pb.GetUsableModelsRequest{})
 	response, err := req.HTTPClient.Do(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: target, Headers: h, Body: body})
@@ -44,6 +44,9 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return pluginapi.ModelResponse{Provider: "cursor"}, fmt.Errorf("Cursor model discovery returned HTTP %d", response.StatusCode)
+	}
+	if len(response.Body) > maxFrame {
+		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor model discovery exceeds limit")
 	}
 	decoded := &pb.GetUsableModelsResponse{}
 	if err := proto.Unmarshal(response.Body, decoded); err != nil {
@@ -63,13 +66,4 @@ func first(a, b string) string {
 		return a
 	}
 	return b
-}
-
-// AvailableModels in official CLI responses is intentionally not decoded via
-// JSON. The protobuf schema is authoritative; this helper is used by tests to
-// make sure no discovery payload is accidentally logged.
-func discoveryMetadata(raw []byte) map[string]any {
-	var x map[string]any
-	_ = json.Unmarshal(raw, &x)
-	return x
 }
