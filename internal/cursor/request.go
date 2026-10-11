@@ -51,8 +51,13 @@ type chatRequest struct {
 			Parameters  map[string]any `json:"parameters"`
 		} `json:"function"`
 	} `json:"tools"`
-	ToolChoice json.RawMessage `json:"tool_choice"`
-	N          int             `json:"n"`
+	ToolChoice      json.RawMessage `json:"tool_choice"`
+	N               int             `json:"n"`
+	MaxMode         bool            `json:"max_mode"`
+	ModelParameters []struct {
+		ID    string `json:"id"`
+		Value string `json:"value"`
+	} `json:"cursor_model_parameters"`
 }
 type blobStore struct {
 	data map[string][]byte
@@ -396,6 +401,13 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 		action.Action = &pb.ConversationAction_UserMessageAction{UserMessageAction: &pb.UserMessageAction{UserMessage: newUser(text, images, selectedID), RequestContext: context}}
 	}
 	run := &pb.AgentRunRequest{ConversationState: state, Action: action, RequestedModel: &pb.RequestedModel{ModelId: b.model}, ConversationId: proto.String(uuid()), McpTools: &pb.McpTools{McpTools: b.tools}}
+	run.RequestedModel.MaxMode = chat.MaxMode
+	for _, p := range chat.ModelParameters {
+		if p.ID == "" {
+			return nil, errors.New("Cursor model parameter ID is required")
+		}
+		run.RequestedModel.Parameters = append(run.RequestedModel.Parameters, &pb.RequestedModel_ModelParameterbytes{Id: p.ID, Value: p.Value})
+	}
 	b.message = &pb.AgentClientMessage{Message: &pb.AgentClientMessage_RunRequest{RunRequest: run}}
 	return b, nil
 }
