@@ -20,18 +20,32 @@ static void require(int condition, const char *message) {
 static int host_call(void *ctx, const char *method, const uint8_t *request,
                      size_t length, cliproxy_buffer *response) {
     (void)ctx;
-    (void)request;
-    (void)length;
     require(method != NULL && response != NULL, "host callback arguments");
-    require(strcmp(method, "host.log") == 0, "unexpected host callback (network disabled)");
-    *response = (cliproxy_buffer){0};
-    return 1;
+    const char *payload = NULL;
+    if (strcmp(method,"host.http.operation_open") == 0) {
+        payload = "{\"ok\":true,\"result\":{\"operation_id\":\"fixture-operation\"}}";
+    } else if (strcmp(method,"host.http.do") == 0) {
+        char *json = malloc(length + 1);
+        require(json != NULL,"allocate callback request");
+        memcpy(json,request,length); json[length] = '\0';
+        require(strstr(json,"GetCurrentPeriodUsage") != NULL,"quota upstream route");
+        require(strstr(json,"fixture-access") != NULL,"quota bearer credential");
+        require(strstr(json,"fixture-callback") != NULL,"quota callback scope");
+        free(json);
+        payload = "{\"ok\":true,\"result\":{\"StatusCode\":200,\"Body\":\"eyJwbGFuVXNhZ2UiOnsidG90YWxQZXJjZW50VXNlZCI6MjV9fQ==\"}}";
+    } else {
+        require(0,"unexpected host callback (real network disabled)");
+    }
+    size_t size = strlen(payload);
+    response->ptr = malloc(size);
+    require(response->ptr != NULL,"allocate host response");
+    memcpy(response->ptr,payload,size); response->len = size;
+    return 0;
 }
 
 static void host_free(void *ptr, size_t length) {
-    (void)ptr;
     (void)length;
-    require(0, "host returned no buffers to release");
+    free(ptr);
 }
 
 static void call(cliproxy_plugin_api *api, const char *method, const char *request) {
@@ -68,8 +82,14 @@ int main(int argc, char **argv) {
         "{\"schema_version\":6,\"config_yaml\":\"ZW5hYmxlZDogZmFsc2UK\"}";
     call(&api, "plugin.register", disabled);
     call(&api, "auth.identifier", "{}");
+    call(&api, "quota.identifier", "{}");
+    call(&api, "quota.describe", "{}");
     call(&api, "plugin.quiesce", "{}");
     call(&api, "plugin.reconfigure", disabled);
+    call(&api, "quota.fetch", "{}");
+    call(&api, "plugin.reconfigure", "{}");
+    call(&api, "quota.fetch", "{\"provider\":\"cursor\",\"storage_json\":\"eyJ0eXBlIjoiY3Vyc29yIiwiaWQiOiJmaXh0dXJlIiwiYWNjZXNzX3Rva2VuIjoiZml4dHVyZS1hY2Nlc3MifQ==\",\"host_callback_id\":\"fixture-callback\"}");
+    call(&api, "quota.reset", "{\"provider\":\"cursor\"}");
     call(&api, "plugin.shutdown", "{}");
     api.shutdown();
     api.shutdown();

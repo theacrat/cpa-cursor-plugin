@@ -20,6 +20,7 @@ type Plugin struct {
 	cfg      cursor.Config
 	auth     *cursor.AuthService
 	executor *cursor.Executor
+	quota    *cursor.QuotaService
 	ctx      context.Context
 	cancel   context.CancelFunc
 	workers  sync.WaitGroup
@@ -28,7 +29,7 @@ type Plugin struct {
 func NewPlugin() *Plugin {
 	cfg := cursor.DefaultConfig()
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Plugin{cfg: cfg, auth: cursor.NewAuthService(cfg), executor: cursor.NewExecutor(cfg), ctx: ctx, cancel: cancel}
+	return &Plugin{cfg: cfg, auth: cursor.NewAuthService(cfg), executor: cursor.NewExecutor(cfg), quota: cursor.NewQuotaService(cfg), ctx: ctx, cancel: cancel}
 }
 
 func (p *Plugin) ApplyLifecycle(raw []byte) error {
@@ -55,6 +56,7 @@ func (p *Plugin) ApplyLifecycle(raw []byte) error {
 	p.cfg = cfg
 	p.auth = cursor.NewAuthService(cfg)
 	p.executor = cursor.NewExecutor(cfg)
+	p.quota = cursor.NewQuotaService(cfg)
 	p.quiesced = false
 	return nil
 }
@@ -76,17 +78,16 @@ func (p *Plugin) Quiesce()  { p.stop(false) }
 func (p *Plugin) Registration() map[string]any {
 	return map[string]any{
 		"schema_version": pluginabi.SchemaVersion,
-		"metadata": pluginapi.Metadata{Name: pluginIdentifier, Version: "0.1.0", Author: "thea", GitHubRepository: "https://github.com/theacrat/cpa-cursor-plugin", ConfigFields: []pluginapi.ConfigField{
+		"metadata": pluginapi.Metadata{Name: pluginIdentifier, Version: "0.2.0", Author: "thea", GitHubRepository: "https://github.com/theacrat/cpa-cursor-plugin", ConfigFields: []pluginapi.ConfigField{
 			{Name: "enabled", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable the Cursor provider. Default true."},
 			{Name: "api-base-url", Type: pluginapi.ConfigFieldTypeString, Description: "Cursor API base URL. Default https://api2.cursor.sh."},
 			{Name: "login-url", Type: pluginapi.ConfigFieldTypeString, Description: "Browser login URL. Default https://cursor.com/loginDeepControl."},
-			{Name: "agent-base-url", Type: pluginapi.ConfigFieldTypeString, Description: "Native Cursor agent endpoint."},
 			{Name: "client-version", Type: pluginapi.ConfigFieldTypeString, Description: "Cursor CLI wire compatibility version."},
 			{Name: "request-timeout", Type: pluginapi.ConfigFieldTypeInteger, Description: "Upstream request deadline in seconds. Default 30."},
 			{Name: "login-timeout", Type: pluginapi.ConfigFieldTypeInteger, Description: "Login session lifetime in seconds. Default 300."},
 			{Name: "max-concurrent-streams", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum concurrent inference streams. Default 32."},
 		}},
-		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions"}},
+		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "quota_provider": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions"}},
 	}
 }
 
@@ -102,8 +103,16 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 	switch method {
 	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return map[string]string{"identifier": "cursor"}, nil
+	case pluginabi.MethodQuotaIdentifier:
+		return map[string]string{"identifier": "cursor"}, nil
 	case pluginabi.MethodModelStatic:
 		return pluginapi.ModelResponse{Provider: "cursor"}, nil
+	case pluginabi.MethodQuotaDescribe:
+		var req pluginapi.QuotaDescribeRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, errors.New("invalid quota describe request")
+		}
+		return p.quota.DescribeQuota(p.ctx, req)
 	}
 	if !p.cfg.Enabled {
 		return nil, pluginabi.NewError("provider_disabled", "Cursor provider is disabled", 503)
@@ -144,6 +153,20 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 		}
 		req.HTTPClient = client
 		return p.executor.ModelsForAuth(ctx, req)
+	case pluginabi.MethodQuotaFetch:
+		var req pluginapi.QuotaFetchRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, errors.New("invalid quota fetch request")
+		}
+		req.HTTPClient = client
+		return p.quota.FetchQuota(ctx, req)
+	case pluginabi.MethodQuotaReset:
+		var req pluginapi.QuotaResetRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, errors.New("invalid quota reset request")
+		}
+		req.HTTPClient = client
+		return p.quota.ResetQuota(ctx, req)
 	case pluginabi.MethodExecutorExecute, pluginabi.MethodExecutorExecuteStream, pluginabi.MethodExecutorCountTokens:
 		var req pluginapi.ExecutorRequest
 		if err := json.Unmarshal(raw, &req); err != nil {

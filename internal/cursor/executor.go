@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,29 +14,36 @@ import (
 // Executor owns active runs, not conversation state. Every request republishes
 // the caller's full transcript, including tool results from previous turns.
 type Executor struct {
-	cfg    Config
-	mu     sync.Mutex
-	closed bool
-	active map[uint64]context.CancelFunc
-	next   uint64
-	wg     sync.WaitGroup
-	slots  chan struct{}
-	// client is only injected by package tests. Production transports enforce TLS.
+	cfg       Config
+	configErr error
+	mu        sync.Mutex
+	closed    bool
+	active    map[uint64]context.CancelFunc
+	next      uint64
+	wg        sync.WaitGroup
+	slots     chan struct{}
+	// client is only injected by package tests. Production uses host callbacks.
 	client *http.Client
 }
 
 func (e *Executor) Identifier() string { return "cursor" }
 
 func NewExecutor(cfg Config) *Executor {
+	cfg = cfg.WithDefaults()
+	err := cfg.Validate()
 	n := cfg.MaxConcurrentStreams
-	if n <= 0 {
-		n = 8
+	if err != nil {
+		n = 1
 	}
-	return &Executor{cfg: cfg, active: make(map[uint64]context.CancelFunc), slots: make(chan struct{}, n)}
+	return &Executor{cfg: cfg, configErr: err, active: make(map[uint64]context.CancelFunc), slots: make(chan struct{}, n)}
 }
 
 func (e *Executor) lease(ctx context.Context) (context.Context, func(), error) {
 	e.mu.Lock()
+	if e.configErr != nil {
+		e.mu.Unlock()
+		return nil, nil, e.configErr
+	}
 	if e.closed {
 		e.mu.Unlock()
 		return nil, nil, errors.New("cursor executor is closed")
@@ -47,9 +53,6 @@ func (e *Executor) lease(ctx context.Context) (context.Context, func(), error) {
 		return nil, nil, errors.New("Cursor provider is disabled")
 	}
 	timeout := e.cfg.RequestTimeout
-	if timeout <= 0 {
-		timeout = 300
-	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	e.next++
 	id := e.next
@@ -77,19 +80,11 @@ func (e *Executor) Close() {
 }
 
 func executorToken(storage []byte, metadata map[string]any) (string, error) {
-	var data map[string]any
-	if len(storage) > 0 && json.Unmarshal(storage, &data) != nil {
-		return "", errors.New("invalid Cursor credential storage")
+	m, err := credentialData(storage, metadata)
+	if err != nil {
+		return "", err
 	}
-	token, _ := data["access_token"].(string)
-	if token == "" {
-		token, _ = metadata["access_token"].(string)
-	}
-	token = strings.TrimSpace(token)
-	if token == "" || strings.ContainsAny(token, "\r\n") {
-		return "", errors.New("Cursor access_token is required")
-	}
-	return token, nil
+	return stringField(m, "access_token"), nil
 }
 
 func (e *Executor) CountTokens(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {

@@ -3,7 +3,6 @@ package cursor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -27,9 +26,6 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	}
 	defer release()
 	base := e.cfg.APIBaseURL
-	if base == "" {
-		base = "https://api2.cursor.sh"
-	}
 	target, err := endpoint(base, "/aiserver.v1.AiService/GetUsableModels")
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, err
@@ -40,11 +36,14 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	}
 	body, _ := proto.Marshal(&pb.GetUsableModelsRequest{})
 	response, err := req.HTTPClient.Do(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: target, Headers: h, Body: body})
+	if ctx.Err() != nil {
+		return pluginapi.ModelResponse{Provider: "cursor"}, ctx.Err()
+	}
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor model discovery failed")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return pluginapi.ModelResponse{Provider: "cursor"}, fmt.Errorf("Cursor model discovery returned HTTP %d", response.StatusCode)
+		return pluginapi.ModelResponse{Provider: "cursor"}, &HTTPStatusError{StatusCode: response.StatusCode}
 	}
 	if len(response.Body) > maxFrame {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor model discovery exceeds limit")

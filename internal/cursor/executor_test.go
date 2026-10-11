@@ -26,7 +26,7 @@ import (
 var _ pluginapi.ProviderExecutor = (*Executor)(nil)
 
 func testRequest() pluginapi.ExecutorRequest {
-	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"access_token":"fixture-secret","selected_team_id":123}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
+	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"type":"cursor","access_token":"fixture-secret","selected_team_id":123}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
 }
 func writeServer(t *testing.T, w http.ResponseWriter, msg *pb.AgentServerMessage) {
 	t.Helper()
@@ -65,7 +65,7 @@ func tlsFixture(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Exec
 	s := httptest.NewUnstartedServer(handler)
 	s.EnableHTTP2 = true
 	s.StartTLS()
-	e := NewExecutor(Config{Enabled: true, AgentBaseURL: s.URL, APIBaseURL: s.URL, RequestTimeout: 5})
+	e := NewExecutor(Config{Enabled: true, APIBaseURL: s.URL, RequestTimeout: 5})
 	e.client = s.Client()
 	t.Cleanup(func() { e.Close(); s.Close() })
 	return s, e
