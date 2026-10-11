@@ -154,8 +154,7 @@ func parseStorage(raw []byte) (map[string]any, bool, error) {
 		return nil, true, errors.New("invalid cursor API key")
 	}
 	if v, present := m["selected_team_id"]; present {
-		n, ok := v.(float64)
-		if !ok || n <= 0 || n > 9007199254740991 || n != float64(int64(n)) {
+		if teamHeader(v) == "" {
 			return nil, true, errors.New("invalid cursor selected team")
 		}
 	}
@@ -177,6 +176,26 @@ func parseStorage(raw []byte) (map[string]any, bool, error) {
 		}
 	}
 	return m, true, nil
+}
+
+// credentialData is shared by inference, discovery and quota. Persisted fields
+// are authoritative: malformed storage cannot be repaired by metadata.
+func credentialData(raw []byte, metadata map[string]any) (map[string]any, error) {
+	if len(raw) == 0 {
+		var err error
+		raw, err = json.Marshal(metadata)
+		if err != nil {
+			return nil, errors.New("invalid cursor credentials")
+		}
+	}
+	m, handled, err := parseStorage(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !handled {
+		return nil, errors.New("unsupported cursor credential type")
+	}
+	return m, nil
 }
 
 func storageExpiry(v any) (time.Time, error) {
@@ -414,7 +433,7 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	}
 	m := map[string]any{"type": "cursor", "access_token": tokens.AccessToken, "refresh_token": tokens.RefreshToken}
 	if tokens.SelectedTeamID != nil {
-		if *tokens.SelectedTeamID <= 0 {
+		if *tokens.SelectedTeamID <= 0 || *tokens.SelectedTeamID > 2147483647 {
 			return pluginapi.AuthLoginPollResponse{}, errors.New("cursor login returned invalid team")
 		}
 		m["selected_team_id"] = *tokens.SelectedTeamID

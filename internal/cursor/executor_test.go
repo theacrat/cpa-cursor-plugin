@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ import (
 var _ pluginapi.ProviderExecutor = (*Executor)(nil)
 
 func testRequest() pluginapi.ExecutorRequest {
-	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"access_token":"fixture-secret","selected_team_id":123}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
+	return pluginapi.ExecutorRequest{Model: "fixture", Format: "openai", StorageJSON: []byte(`{"type":"cursor","access_token":"fixture-secret","selected_team_id":123}`), Payload: []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)}
 }
 func writeServer(t *testing.T, w http.ResponseWriter, msg *pb.AgentServerMessage) {
 	t.Helper()
@@ -65,7 +66,7 @@ func tlsFixture(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Exec
 	s := httptest.NewUnstartedServer(handler)
 	s.EnableHTTP2 = true
 	s.StartTLS()
-	e := NewExecutor(Config{Enabled: true, AgentBaseURL: s.URL, APIBaseURL: s.URL, RequestTimeout: 5})
+	e := NewExecutor(Config{Enabled: true, APIBaseURL: s.URL, RequestTimeout: 5})
 	e.client = s.Client()
 	t.Cleanup(func() { e.Close(); s.Close() })
 	return s, e
@@ -195,6 +196,7 @@ func TestStreamAndCloseDrain(t *testing.T) {
 		readClient(t, r.Body)
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
+		writeServer(t, w, update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_TextDelta{TextDelta: &pb.TextDeltaUpdate{Text: "started"}}}))
 		close(started)
 		<-r.Context().Done()
 	})
@@ -214,6 +216,22 @@ func TestStreamAndCloseDrain(t *testing.T) {
 	}
 	if _, err = e.Execute(context.Background(), testRequest()); err == nil {
 		t.Fatal("closed executor admitted a run")
+	}
+}
+
+func TestStreamingHTTPRejectionPreservesStatusBeforeAdmission(t *testing.T) {
+	for _, status := range []int{401, 429, 503} {
+		e := NewExecutor(DefaultConfig())
+		req := testRequest()
+		req.HTTPClient = fixtureHost{stream: func(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {
+			return pluginapi.HTTPStreamResponse{StatusCode: status}, nil
+		}}
+		_, err := e.ExecuteStream(context.Background(), req)
+		e.Close()
+		var upstream *HTTPStatusError
+		if !errors.As(err, &upstream) || upstream.StatusCode != status {
+			t.Fatalf("status%d err%v", status, err)
+		}
 	}
 }
 

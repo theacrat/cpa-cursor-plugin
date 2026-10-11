@@ -6,20 +6,16 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	pb "github.com/theacrat/cpa-cursor-plugin/internal/proto"
-	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
@@ -32,28 +28,21 @@ type runTransport struct {
 
 func endpoint(base, path string) (string, error) {
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || validateURL(base) != nil {
 		return "", errors.New("Cursor endpoint must be an HTTPS URL without credentials, query or fragment")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + path
 	return u.String(), nil
 }
 func (e *Executor) headers(storage []byte, metadata map[string]any, stream bool, id string) (http.Header, error) {
-	token, err := executorToken(storage, metadata)
+	data, err := credentialData(storage, metadata)
 	if err != nil {
 		return nil, err
 	}
+	token := stringField(data, "access_token")
 	version := e.cfg.ClientVersion
-	if version == "" {
-		version = "cli-2026.10.01-e373342"
-	}
 	h := http.Header{"Authorization": []string{"Bearer " + token}, "Connect-Protocol-Version": []string{"1"}, "X-Ghost-Mode": []string{"true"}, "X-Cursor-Client-Version": []string{version}, "X-Cursor-Client-Type": []string{"cli"}, "X-Request-Id": []string{id}, "Content-Type": []string{"application/proto"}}
-	var data map[string]any
-	_ = json.Unmarshal(storage, &data)
 	team := teamHeader(data["selected_team_id"])
-	if team == "" {
-		team = teamHeader(metadata["selected_team_id"])
-	}
 	if team != "" {
 		if strings.ContainsAny(team, "\r\n") {
 			return nil, errors.New("invalid Cursor team ID")
@@ -70,15 +59,15 @@ func (e *Executor) headers(storage []byte, metadata map[string]any, stream bool,
 func teamHeader(value any) string {
 	switch v := value.(type) {
 	case float64:
-		if v > 0 && v <= 9007199254740991 && v == float64(int64(v)) {
+		if v > 0 && v <= 2147483647 && v == float64(int64(v)) {
 			return strconv.FormatInt(int64(v), 10)
 		}
 	case int64:
-		if v > 0 {
+		if v > 0 && v <= 2147483647 {
 			return strconv.FormatInt(v, 10)
 		}
 	case string:
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 && n <= 2147483647 && strconv.FormatInt(n, 10) == v {
 			return strconv.FormatInt(n, 10)
 		}
 	}
@@ -150,13 +139,7 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 		}
 	}()
 	base := e.cfg.APIBaseURL
-	if base == "" {
-		base = "https://api2.cursor.sh"
-	}
 	api := e.cfg.APIBaseURL
-	if api == "" {
-		api = "https://api2.cursor.sh"
-	}
 	runURL, err := endpoint(base, "/agent.v1.AgentService/RunSSE")
 	if err != nil {
 		return nil, err
@@ -176,11 +159,14 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 	binary.BigEndian.PutUint32(requestBody[1:5], uint32(len(bidiID)))
 	copy(requestBody[5:], bidiID)
 	stream, err := req.HTTPClient.DoStream(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: runURL, Headers: h, Body: requestBody})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, errors.New("Cursor RunSSE transport failed")
 	}
 	if stream.StatusCode < 200 || stream.StatusCode >= 300 {
-		return nil, fmt.Errorf("Cursor RunSSE returned HTTP %d", stream.StatusCode)
+		return nil, &HTTPStatusError{StatusCode: stream.StatusCode}
 	}
 	pr, pw := io.Pipe()
 	pumpDone := make(chan struct{})
@@ -229,11 +215,14 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 		headers := h.Clone()
 		headers.Set("Content-Type", "application/proto")
 		resp, err := req.HTTPClient.Do(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: appendURL, Headers: headers, Body: body})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return errors.New("Cursor BidiAppend transport failed")
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("Cursor BidiAppend returned HTTP %d", resp.StatusCode)
+			return &HTTPStatusError{StatusCode: resp.StatusCode}
 		}
 		seq++
 		return nil
@@ -248,11 +237,7 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 }
 
 func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest) (*runTransport, error) {
-	base := e.cfg.AgentBaseURL
-	if base == "" {
-		base = "https://api2.cursor.sh"
-	}
-	runURL, err := endpoint(base, "/agent.v1.AgentService/Run")
+	runURL, err := endpoint(e.cfg.APIBaseURL, "/agent.v1.AgentService/Run")
 	if err != nil {
 		return nil, err
 	}
@@ -261,31 +246,8 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 		return nil, err
 	}
 	client := e.client
-	var transport *http.Transport
 	if client == nil {
-		transport = http.DefaultTransport.(*http.Transport).Clone()
-		transport.ForceAttemptHTTP2 = true
-		transport.ResponseHeaderTimeout = 30 * time.Second
-		proxy := req.AuthAttributes["proxy_url"]
-		if proxy == "" {
-			proxy, _ = req.AuthMetadata["proxy_url"].(string)
-		}
-		if proxy == "" {
-			proxy, _ = req.Metadata["proxy_url"].(string)
-		}
-		if proxy == "direct" {
-			transport.Proxy = nil
-		} else if proxy != "" {
-			p, err := url.Parse(proxy)
-			if err != nil || p.Host == "" || (p.Scheme != "http" && p.Scheme != "https" && p.Scheme != "socks5" && p.Scheme != "socks5h") {
-				return nil, errors.New("unsupported Cursor proxy URL")
-			}
-			transport.Proxy = http.ProxyURL(p)
-		}
-		if err := http2.ConfigureTransport(transport); err != nil {
-			return nil, errors.New("Cursor HTTP/2 transport configuration failed")
-		}
-		client = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		return nil, errors.New("native Cursor transport requires injected test client")
 	}
 	pr, pw := io.Pipe()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, runURL, pr)
@@ -304,19 +266,15 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 		_ = pr.Close()
 		_ = pw.Close()
 		<-initialDone
-		if transport != nil {
-			transport.CloseIdleConnections()
-		}
 		return nil, errors.New("Cursor native HTTP/2 transport failed")
 	}
 	cleanup := func() {
 		_ = resp.Body.Close()
 		_ = pr.Close()
 		_ = pw.Close()
-		if transport != nil {
-			transport.CloseIdleConnections()
-		}
 	}
+	stopCleanup := context.AfterFunc(ctx, cleanup)
+	closeTransport := func() { stopCleanup(); cleanup() }
 	if resp.ProtoMajor != 2 {
 		cleanup()
 		<-initialDone
@@ -325,7 +283,7 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		cleanup()
 		<-initialDone
-		return nil, fmt.Errorf("Cursor Run returned HTTP %d", resp.StatusCode)
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode}
 	}
 	if err := <-initialDone; err != nil {
 		cleanup()
@@ -341,5 +299,5 @@ func (e *Executor) nativeRun(ctx context.Context, req pluginapi.ExecutorRequest,
 		defer mu.Unlock()
 		_, err = pw.Write(raw)
 		return err
-	}, close: cleanup}, nil
+	}, close: closeTransport}, nil
 }

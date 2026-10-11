@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -70,7 +69,7 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				return r, errors.New("invalid Cursor Connect trailer")
 			}
 			if trailer.Error != nil {
-				return r, fmt.Errorf("Cursor Connect error (%s)", safeCode(trailer.Error.Code))
+				return r, connectStatus(trailer.Error.Code)
 			}
 			return r, errors.New("Cursor Connect stream ended before turnEnded")
 		}
@@ -197,18 +196,6 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 		}
 	}
 }
-func safeCode(code string) string {
-	for _, r := range code {
-		if !(r >= 'a' && r <= 'z') && r != '_' {
-			return "upstream_error"
-		}
-	}
-	if len(code) > 64 || code == "" {
-		return "upstream_error"
-	}
-	return code
-}
-
 func execReply(exec *pb.ExecServerMessage, tools []*pb.McpToolDefinition) (*pb.AgentClientMessage, error) {
 	reply := &pb.ExecClientMessage{Id: exec.Id, ExecId: exec.ExecId}
 	switch exec.Message.(type) {

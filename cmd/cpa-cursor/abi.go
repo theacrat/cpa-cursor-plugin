@@ -256,19 +256,31 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	if err != nil {
 		var upstream *pluginabi.Error
 		if errors.As(err, &upstream) {
-			return json.Marshal(pluginabi.Envelope{OK: false, Error: upstream})
+			copy := *upstream
+			copy.Retryable = copy.Retryable || retryableStatus(copy.HTTPStatus)
+			return json.Marshal(pluginabi.Envelope{OK: false, Error: &copy})
 		}
 		var status interface{ StatusCode() int }
 		if errors.As(err, &status) {
-			return json.Marshal(pluginabi.Envelope{OK: false, Error: pluginabi.NewError("upstream_error", err.Error(), status.StatusCode())})
+			return upstreamErrorEnvelope(err.Error(), status.StatusCode())
 		}
 		var authStatus *cursor.HTTPStatusError
 		if errors.As(err, &authStatus) {
-			return json.Marshal(pluginabi.Envelope{OK: false, Error: pluginabi.NewError("upstream_error", err.Error(), authStatus.StatusCode)})
+			return upstreamErrorEnvelope(err.Error(), authStatus.StatusCode)
 		}
 		return errorEnvelope("plugin_error", err.Error()), nil
 	}
 	return okEnvelope(value)
+}
+
+func retryableStatus(status int) bool {
+	return status == 408 || status == 429 || status >= 500 && status <= 599
+}
+
+func upstreamErrorEnvelope(message string, status int) ([]byte, error) {
+	err := pluginabi.NewError("upstream_error", message, status)
+	err.Retryable = retryableStatus(status)
+	return json.Marshal(pluginabi.Envelope{OK: false, Error: err})
 }
 
 func okEnvelope(value any) ([]byte, error) {

@@ -19,7 +19,6 @@ type Config struct {
 	Enabled              bool   `yaml:"enabled"`
 	APIBaseURL           string `yaml:"api-base-url"`
 	LoginURL             string `yaml:"login-url"`
-	AgentBaseURL         string `yaml:"agent-base-url"`
 	ClientVersion        string `yaml:"client-version"`
 	RequestTimeout       int    `yaml:"request-timeout"`
 	LoginTimeout         int    `yaml:"login-timeout"`
@@ -27,7 +26,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", AgentBaseURL: "https://agentn.us.api5.cursor.sh", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32}
+	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32}
 }
 
 // WithDefaults fills optional zero values without changing Enabled.
@@ -38,9 +37,6 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.LoginURL == "" {
 		c.LoginURL = d.LoginURL
-	}
-	if c.AgentBaseURL == "" {
-		c.AgentBaseURL = d.AgentBaseURL
 	}
 	if c.ClientVersion == "" {
 		c.ClientVersion = d.ClientVersion
@@ -75,7 +71,7 @@ func ParseConfig(data []byte) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	for _, raw := range []string{c.APIBaseURL, c.LoginURL, c.AgentBaseURL} {
+	for _, raw := range []string{c.APIBaseURL, c.LoginURL} {
 		if err := validateURL(raw); err != nil {
 			return err
 		}

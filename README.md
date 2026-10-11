@@ -21,7 +21,6 @@ plugins:
       enabled: true
       api-base-url: https://api2.cursor.sh
       login-url: https://cursor.com/loginDeepControl
-      agent-base-url: https://agentn.us.api5.cursor.sh
       client-version: cli-2026.10.01-e373342
       request-timeout: 30
       login-timeout: 300
@@ -29,6 +28,10 @@ plugins:
 ```
 
 Restart CPA after installing the library. Endpoint overrides are administrative settings, not request-controlled URLs; only trusted operators should change them.
+
+## Quota
+
+The plugin reports Cursor Dashboard usage through the host HTTP transport. It publishes only fields returned by Cursor; monetary values are upstream cents converted to USD, and absent or null limits remain absent. Quota reset is not supported.
 
 ## Authentication
 
