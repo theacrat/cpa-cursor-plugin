@@ -37,8 +37,10 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 	var err error
 	if req.HTTPClient != nil {
 		t, err = e.hostRun(ctx, req, b)
-	} else {
+	} else if e.client != nil {
 		t, err = e.nativeRun(ctx, req, b)
+	} else {
+		return runResult{}, errors.New("Cursor inference requires the CPA host HTTP client")
 	}
 	if err != nil {
 		return runResult{}, err

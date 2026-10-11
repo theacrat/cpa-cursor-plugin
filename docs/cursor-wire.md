@@ -12,11 +12,9 @@ both routes; append sequence numbers start at zero. This keeps host proxy,
 request logging and cancellation policy. The streaming input is a single
 Connect-framed BidiRequestId; appends are protobuf with hex client-message data.
 
-Standalone calls without a host client use a native TLS HTTP/2 `http.Client`
-and `io.Pipe` at `/agent.v1.AgentService/Run`. This is the only native transport
-exception. Per-auth attribute proxy wins over auth metadata, then host metadata
-`proxy_url`, then standard environment proxies. `direct` explicitly bypasses
-proxies. Host callers always use host transport, never silent native fallback.
+Production calls require a host client. A test-injected `http.Client` exercises
+native TLS HTTP/2 and `io.Pipe` at `/agent.v1.AgentService/Run` in local protocol
+fixtures; it is not a production fallback. Host callers always use host transport.
 
 Requests rebuild the full caller transcript rather than retaining upstream
 sessions. Completed turn structures and model-visible JSON root prompts are

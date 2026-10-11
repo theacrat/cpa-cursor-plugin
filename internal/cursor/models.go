@@ -58,7 +58,7 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 		if strings.TrimSpace(m.ModelId) == "" {
 			continue
 		}
-		models = append(models, pluginapi.ModelInfo{ID: m.ModelId, Object: "model", Created: time.Now().Unix(), OwnedBy: "cursor", Type: "chat", DisplayName: first(m.DisplayName, m.ModelId), Name: m.ModelId})
+		models = append(models, pluginapi.ModelInfo{ID: m.ModelId, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: first(m.DisplayName, m.ModelId), Name: m.ModelId})
 	}
 	// The official CLI enriches its usable catalogue with AvailableModels.
 	// Discovery still succeeds when this optional endpoint is unavailable.

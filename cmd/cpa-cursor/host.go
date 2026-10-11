@@ -50,8 +50,8 @@ func (h hostHTTP) operation(ctx context.Context) (string, func(), error) {
 	}
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
-		defer close(done)
 		_ = hostDecode(pluginabi.MethodHostHTTPCancel, map[string]string{"host_callback_id": h.callbackID, "operation_id": opened.ID}, nil)
+		close(done)
 	})
 	return opened.ID, func() {
 		if !stop() {

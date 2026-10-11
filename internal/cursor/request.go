@@ -39,6 +39,7 @@ type chatMessage struct {
 	ToolCalls  []toolCall      `json:"tool_calls"`
 	ToolCallID string          `json:"tool_call_id"`
 	Reasoning  string          `json:"reasoning_content"`
+	IsError    bool            `json:"is_error"`
 }
 type chatRequest struct {
 	Model    string        `json:"model"`
@@ -326,6 +327,14 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				return nil, fmt.Errorf("assistant at message %d has no user turn", i)
 			}
 			var parts []any
+			if m.Reasoning != "" {
+				id, err := b.blobs.message(&pb.ConversationStep{Message: &pb.ConversationStep_ThinkingMessage{ThinkingMessage: &pb.ThinkingMessage{Text: m.Reasoning}}})
+				if err != nil {
+					return nil, err
+				}
+				current.Steps = append(current.Steps, id)
+				parts = append(parts, map[string]any{"type": "reasoning", "text": m.Reasoning})
+			}
 			if text != "" {
 				parts = append(parts, map[string]any{"type": "text", "text": text})
 				id, err := b.blobs.message(&pb.ConversationStep{Message: &pb.ConversationStep_AssistantMessage{AssistantMessage: &pb.AssistantMessage{Text: text}}})
@@ -371,13 +380,17 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 			for _, img := range imgs {
 				items = append(items, &pb.McpToolResultContentItem{Content: &pb.McpToolResultContentItem_Image{Image: &pb.McpImageContent{Data: img.GetData(), MimeType: img.MimeType}}})
 			}
-			mc.Result = &pb.McpToolResult{Result: &pb.McpToolResult_Success{Success: &pb.McpSuccess{Content: items}}}
+			if m.IsError {
+				mc.Result = &pb.McpToolResult{Result: &pb.McpToolResult_Error{Error: &pb.McpToolError{Error: text}}}
+			} else {
+				mc.Result = &pb.McpToolResult{Result: &pb.McpToolResult_Success{Success: &pb.McpSuccess{Content: items}}}
+			}
 			id, err := b.blobs.message(&pb.ConversationStep{Message: &pb.ConversationStep_ToolCall{ToolCall: &pb.ToolCall{Tool: &pb.ToolCall_McpToolCall{McpToolCall: mc}}}})
 			if err != nil {
 				return nil, err
 			}
 			current.Steps = append(current.Steps, id)
-			if err := addRoot(map[string]any{"role": "tool", "content": []any{map[string]any{"type": "tool-result", "toolCallId": m.ToolCallID, "toolName": "mcp_" + toolProvider + "_" + callNames[m.ToolCallID], "result": text}}}); err != nil {
+			if err := addRoot(map[string]any{"role": "tool", "content": []any{map[string]any{"type": "tool-result", "toolCallId": m.ToolCallID, "toolName": "mcp_" + toolProvider + "_" + callNames[m.ToolCallID], "result": text, "isError": m.IsError}}}); err != nil {
 				return nil, err
 			}
 			delete(calls, m.ToolCallID)
