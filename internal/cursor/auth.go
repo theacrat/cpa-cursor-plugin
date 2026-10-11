@@ -43,6 +43,7 @@ type loginSession struct {
 	uuid, verifier    string
 	expires, nextPoll time.Time
 	inflight          bool
+	failures          int
 }
 
 type AuthService struct {
@@ -379,12 +380,28 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	err = DoJSON(ctx, req.HTTPClient, pluginapi.HTTPRequest{Method: http.MethodGet, URL: u.String(), Headers: http.Header{"Content-Type": {"application/json"}}}, time.Duration(cfg.RequestTimeout)*time.Second, &tokens)
 	var status *HTTPStatusError
 	if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
+		s.mu.Lock()
+		session.failures = 0
+		s.mu.Unlock()
 		return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}, nil
 	}
 	if err != nil {
+		s.mu.Lock()
+		session.failures++
+		terminal := session.failures >= 3 || (status != nil && status.StatusCode == http.StatusForbidden)
+		if terminal {
+			delete(s.sessions, req.State)
+		}
+		s.mu.Unlock()
+		if terminal {
+			return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: "cursor login failed; start a new login"}, nil
+		}
 		return pluginapi.AuthLoginPollResponse{}, err
 	}
 	if strings.TrimSpace(tokens.AccessToken) == "" || strings.TrimSpace(tokens.RefreshToken) == "" || strings.ContainsAny(tokens.AccessToken+tokens.RefreshToken, "\r\n") {
+		s.mu.Lock()
+		delete(s.sessions, req.State)
+		s.mu.Unlock()
 		return pluginapi.AuthLoginPollResponse{}, errors.New("cursor login returned invalid tokens")
 	}
 	s.mu.Lock()

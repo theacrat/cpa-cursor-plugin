@@ -178,6 +178,9 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 					message = chunk.Err.Error()
 				}
 				if err := hostDecode(pluginabi.MethodHostStreamEmit, map[string]any{"stream_id": wire.StreamID, "payload": chunk.Payload, "error": message}, nil); err != nil {
+					cancel()
+					for range stream.Chunks {
+					}
 					return
 				}
 			}

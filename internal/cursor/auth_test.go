@@ -221,6 +221,24 @@ func TestLoginPollFailuresAreRedacted(t *testing.T) {
 	}
 }
 
+func TestLoginPollStopsAfterThreeFailures(t *testing.T) {
+	s, now := fixtureService(t)
+	start, _ := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})
+	client := fakeHTTP{do: func(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		return pluginapi.HTTPResponse{StatusCode: 500}, nil
+	}}
+	for i := 0; i < 3; i++ {
+		*now = now.Add(time.Second)
+		result, err := s.PollLogin(context.Background(), pluginapi.AuthLoginPollRequest{State: start.State, HTTPClient: client})
+		if i < 2 && err == nil {
+			t.Fatalf("poll %d unexpectedly succeeded", i)
+		}
+		if i == 2 && (err != nil || result.Status != pluginapi.AuthLoginStatusError) {
+			t.Fatalf("final result=%#v err=%v", result, err)
+		}
+	}
+}
+
 func TestConcurrentPollAndCloseCancellation(t *testing.T) {
 	s, _ := fixtureService(t)
 	start, _ := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})

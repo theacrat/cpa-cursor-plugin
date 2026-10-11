@@ -34,9 +34,25 @@ Restart CPA after installing the library. Endpoint overrides are administrative 
 
 Choose provider `cursor` in CPA's plugin OAuth login interface. Open the returned Cursor browser URL and sign in. CPA polls the login and persists the resulting provider credential in its auth directory. Pending sessions are process-local and expire; restarting/reloading the plugin requires starting login again.
 
+The native management endpoint is `GET /v0/management/cursor-auth-url`. Use your usual CPA management authentication header; the response contains `url` and `state`. After signing in, poll `GET /v0/management/get-auth-status?state=<state>` with the same management authentication. Do not put management keys into URLs.
+
 Cursor uses a custom PKCE-style browser flow, not RFC 8628 device authorisation. The verifier stays inside the plugin; it is sent only to Cursor's poll endpoint. Do not publish credential files or upstream request logs containing login query parameters.
 
 The official CLI does not implement browser refresh-token exchange. Expired browser credentials require another login. Dashboard API keys can be exchanged for fresh access tokens; this is a different operation from rotating browser refresh tokens.
+
+Existing credentials can also be imported through CPA's auth-file interface:
+
+```json
+{
+  "type": "cursor",
+  "id": "cursor-my-account",
+  "access_token": "REPLACE_WITH_ACCESS_TOKEN",
+  "refresh_token": "REPLACE_WITH_REFRESH_TOKEN",
+  "expires_at": "2026-10-11T12:00:00Z"
+}
+```
+
+Use a stable unique `id` for access-token-only records. Include an optional `api_key` only when deliberately enabling dashboard API-key re-exchange. `selected_team_id`, `prefix`, `proxy_url`, `label`, `email` and `disabled` are preserved when supplied. Values shown above are placeholders, not working credentials.
 
 ## Security
 
@@ -49,3 +65,12 @@ The official CLI does not implement browser refresh-token exchange. Expired brow
 ## Development
 
 The project uses Go, CGO and a C compiler. Build artefacts are placed under `dist/<os>-<arch>/`. Toolchain and CI commands are documented by `mise.toml` and `Makefile`; the checks include pure Go tests, race tests and a native C loader.
+
+```bash
+mise install
+mise run check
+mise run build
+git config core.hooksPath .githooks
+```
+
+See [tooling](docs/tooling.md) for cross builds and [the ABI smoke fixture](tests/abi/README.md) for native-loader verification. Tag releases as `vX.Y.Z` to publish platform archives and SHA-256 checksums.
