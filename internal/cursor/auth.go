@@ -235,6 +235,26 @@ func tokenExpiry(token string, now time.Time) time.Time {
 
 func stringField(m map[string]any, key string) string { v, _ := m[key].(string); return v }
 
+// sanitizeFileName keeps CPA-persisted auth file names inside the auth
+// directory with a .json suffix the host scanner recognises.
+func sanitizeFileName(name string) string {
+	name = strings.TrimSpace(name)
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.' || r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	name = strings.Trim(b.String(), "._")
+	if name == "" || len(name) > 128 {
+		return ""
+	}
+	return name
+}
+
 func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	access := stringField(m, "access_token")
 	claims := jwtClaims(access)
@@ -256,6 +276,20 @@ func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 		id = "cursor-" + hex.EncodeToString(hash[:16])
 	}
 	m["id"] = id
+	// CPA only rescans *.json auth files on restart. An empty file name makes
+	// the host persist the record under the bare auth ID, which its scanner
+	// then skips and the credential is silently lost on reload.
+	fileName := sanitizeFileName(stringField(m, "file_name"))
+	if fileName == "" {
+		fileName = sanitizeFileName(id)
+	}
+	if fileName == "" {
+		return pluginapi.AuthData{}, errors.New("cursor auth requires a usable file name")
+	}
+	if !strings.HasSuffix(strings.ToLower(fileName), ".json") {
+		fileName += ".json"
+	}
+	m["file_name"] = fileName
 	if stringField(m, "email") == "" {
 		if email := stringField(claims, "email"); email != "" {
 			m["email"] = email
@@ -311,8 +345,11 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
-	if req.FileName != "" {
-		a.FileName = req.FileName
+	if name := sanitizeFileName(req.FileName); name != "" {
+		if !strings.HasSuffix(strings.ToLower(name), ".json") {
+			name += ".json"
+		}
+		a.FileName = name
 	}
 	return pluginapi.AuthParseResponse{Handled: true, Auth: a}, lifecycleError(ctx)
 }
