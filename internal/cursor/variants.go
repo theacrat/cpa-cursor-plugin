@@ -26,27 +26,31 @@ const (
 	levelMax     = "max"
 )
 
-// effortKinds are Cursor model ID suffixes that denote an effort variant.
-// "thinking" is Cursor's binary thinking toggle, not a canonical level.
-var effortKinds = map[string]bool{
-	levelMinimal: true,
-	levelLow:     true,
-	levelMedium:  true,
-	levelHigh:    true,
-	levelMax:     true,
-	"thinking":   true,
+// familyTokens are trailing ID segments folded into one model family.
+// Effort tokens double as switcher kinds; fast/none only affect ranking.
+var familyTokens = map[string]bool{
+	"thinking": true, levelMinimal: true, levelLow: true, levelMedium: true,
+	levelHigh: true, levelXHigh: true, levelMax: true, "fast": true, "none": true,
+}
+
+// effortTokens are family tokens that select reasoning effort.
+var effortTokens = map[string]bool{
+	"thinking": true, levelMinimal: true, levelLow: true, levelMedium: true,
+	levelHigh: true, levelXHigh: true, levelMax: true,
 }
 
 const defaultKind = "default"
 
-// variantGroup is one base model and its known upstream variant IDs by kind.
+// variantGroup is one model family and its known upstream variant IDs.
 type variantGroup struct {
 	base    string
 	display string
 	ids     map[string]string
+	rank    map[string]int
+	hasBare bool
 }
 
-// variantTable maps collapsed base IDs to their upstream variants.
+// variantTable maps family base IDs to their upstream variants.
 type variantTable struct {
 	byBase map[string]*variantGroup
 }
@@ -56,65 +60,79 @@ type variantCacheEntry struct {
 	expires time.Time
 }
 
-// splitVariant divides a discovered model ID into its collapsed base and
-// effort kind. Unknown trailing segments keep the full ID as kind default
-// so unrelated models never merge.
-func splitVariant(id string) (base, kind string) {
-	if i := strings.LastIndex(id, "-"); i > 0 && !strings.HasSuffix(id[:i], "/") {
-		if token := strings.ToLower(id[i+1:]); effortKinds[token] {
-			return id[:i], token
+// analyseVariant folds a discovered model ID into its family base, effort
+// kind and selection rank. Trailing family tokens are stripped inside out;
+// the rightmost effort token sets the kind and the standard (non-fast) tier
+// outranks fast ones so each kind keeps a single deterministic ID.
+func analyseVariant(id string) (base, kind string, rank int, bare bool) {
+	rest := id
+	kind = defaultKind
+	fast := false
+	for {
+		i := strings.LastIndex(rest, "-")
+		if i <= 0 || strings.HasSuffix(rest[:i], "/") {
+			break
 		}
+		token := strings.ToLower(rest[i+1:])
+		if token == "fast" {
+			fast = true
+			rest = rest[:i]
+			rank += 10
+			continue
+		}
+		if !familyTokens[token] {
+			break
+		}
+		if effortTokens[token] && kind == defaultKind {
+			kind = token
+		}
+		rest = rest[:i]
+		rank += 10
 	}
-	return id, defaultKind
+	if rest == "" || strings.HasSuffix(rest, "/") {
+		return id, defaultKind, 0, true
+	}
+	if fast {
+		rank++
+	}
+	return rest, kind, rank, rank == 0
 }
 
-// groupVariants clusters discovered rows by display name. Only groups whose
-// rows agree on one base collapse; anything else stays separate.
+// groupVariants clusters discovered rows by family base ID, so one row is
+// published per model family whatever the upstream display names say.
 func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
-	byName := map[string][]*pb.ModelDetails{}
+	byBase := map[string]*variantGroup{}
 	order := []string{}
 	for _, row := range rows {
 		if strings.TrimSpace(row.ModelId) == "" {
 			continue
 		}
-		name := first(row.DisplayName, row.ModelId)
-		if _, ok := byName[name]; !ok {
-			order = append(order, name)
+		base, kind, rank, bare := analyseVariant(row.ModelId)
+		group, ok := byBase[base]
+		if !ok {
+			group = &variantGroup{base: base, display: first(row.DisplayName, row.ModelId), ids: map[string]string{}, rank: map[string]int{}}
+			byBase[base] = group
+			order = append(order, base)
 		}
-		byName[name] = append(byName[name], row)
+		if _, ok := group.ids[kind]; !ok || rank < group.rank[kind] {
+			group.ids[kind] = row.ModelId
+			group.rank[kind] = rank
+		}
+		if bare {
+			group.hasBare = true
+		}
 	}
-	var out []*variantGroup
-	for _, name := range order {
-		members := byName[name]
-		group := &variantGroup{display: name, ids: map[string]string{}}
-		for _, row := range members {
-			base, kind := splitVariant(row.ModelId)
-			if group.base == "" {
-				group.base = base
-			}
-			if group.base != base {
-				group = nil
-				break
-			}
-			if _, dup := group.ids[kind]; !dup {
-				group.ids[kind] = row.ModelId
-			}
-		}
-		if group == nil {
-			for _, row := range members {
-				out = append(out, &variantGroup{base: row.ModelId, display: name, ids: map[string]string{defaultKind: row.ModelId}})
-			}
-			continue
-		}
-		out = append(out, group)
+	out := make([]*variantGroup, 0, len(order))
+	for _, base := range order {
+		out = append(out, byBase[base])
 	}
 	return out
 }
 
 // defaultVariantID selects the no-effort variant: the bare ID when present,
-// otherwise medium, high, low, max, minimal, thinking, in that order.
+// otherwise medium, high, low, max, minimal, xhigh, thinking, in that order.
 func defaultVariantID(group *variantGroup) string {
-	for _, kind := range []string{defaultKind, levelMedium, levelHigh, levelLow, levelMax, levelMinimal, "thinking"} {
+	for _, kind := range []string{defaultKind, levelMedium, levelHigh, levelLow, levelMax, levelMinimal, levelXHigh, "thinking"} {
 		if id := group.ids[kind]; id != "" {
 			return id
 		}
@@ -153,7 +171,7 @@ func resolveVariant(group *variantGroup, effort string) (string, error) {
 	case levelHigh:
 		return pick(levelHigh, "thinking"), nil
 	case levelXHigh:
-		return pick(levelMax, "thinking"), nil
+		return pick(levelXHigh, levelMax, "thinking"), nil
 	case levelMax:
 		return pick(levelMax, "thinking"), nil
 	case "thinking":
@@ -393,11 +411,11 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 	}
 	group := table.byBase[base]
 	if group == nil {
-		// A bare suffixed ID from before the switcher (for example
+		// A suffixed ID from before the switcher (for example
 		// claude-opus-4-8-high) no longer routes; say so explicitly.
-		if stem, kind := splitVariant(base); kind != defaultKind {
-			if _, ok := table.byBase[stem]; ok {
-				return "", errors.New("Cursor effort variants moved to the thinking switcher: use " + stem + " with a (level) suffix")
+		if family, _, _, _ := analyseVariant(base); family != base {
+			if _, ok := table.byBase[family]; ok {
+				return "", errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
 			}
 		}
 		return "", errors.New("unknown cursor model")

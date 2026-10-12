@@ -100,7 +100,7 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	}
 	for i := range models {
 		if levels := advertisedLevels(tables[models[i].ID]); len(levels) > 0 {
-			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: tables[models[i].ID].ids[defaultKind] != ""}
+			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: tables[models[i].ID].hasBare}
 		}
 	}
 	disambiguateDisplayNames(models)
