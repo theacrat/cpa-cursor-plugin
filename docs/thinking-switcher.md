@@ -14,12 +14,16 @@ using CPA's native `model(level)` suffix convention. CPA routes `base(level)`
 to the registered `base` row and hands the full string to the executor
 unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
 
-- Discovery groups variant rows by display name. A trailing
-  `-minimal|-low|-medium|-high|-max|-thinking` splits each ID into a common
-  base plus an effort kind; anything else is kind `default`. Groups whose rows
-  disagree on the base are not collapsed. Collapsed rows carry
-  `ThinkingSupport` with the servable canonical levels, so management clients
-  can render a thinking switcher.
+- Discovery groups variant rows by family base ID, because families share
+  display names only by accident and CPA's v8 model list drops provider
+  display names entirely (a same-owner catalog backfill would otherwise
+  re-duplicate every pair). Trailing `-thinking|-minimal|-low|-medium|-high|`
+  `-xhigh|-max|-fast|-none` segments fold into the family; the first
+  effort token from the right sets the kind, anything else is kind `default`.
+  One row per family carries `ThinkingSupport` with the servable canonical
+  levels, so management clients can render a thinking switcher. Speed-tier
+  (`-fast`) and `none` variants fold into the family table rather than the
+  list; the standard tier wins each kind.
 - The executor resolves the variant per request and sends that variant ID
   upstream as `RequestedModel.ModelId`. Effort precedence: `(suffix)` in the
   requested model, then `reasoning_effort` in the chat payload, then the

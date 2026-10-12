@@ -19,58 +19,75 @@ func variantRows(ids ...string) []*pb.ModelDetails {
 	return rows
 }
 
-func TestSplitVariant(t *testing.T) {
-	for _, tc := range []struct{ id, base, kind string }{
-		{"claude-opus-4-8-high", "claude-opus-4-8", "high"},
-		{"gemini-3.6-flash-minimal", "gemini-3.6-flash", "minimal"},
-		{"claude-4.5-sonnet-thinking", "claude-4.5-sonnet", "thinking"},
-		{"claude-4.5-sonnet", "claude-4.5-sonnet", "default"},
-		{"gpt-5.3-codex", "gpt-5.3-codex", "default"},
-		{"some-max-model", "some-max-model", "default"},
-		{"ns/model-low", "ns/model", "low"},
-		{"model-HIGH", "model", "high"},
+func TestAnalyseVariant(t *testing.T) {
+	for _, tc := range []struct {
+		id, base, kind string
+		rank           int
+		bare           bool
+	}{
+		{"claude-opus-4-8-high", "claude-opus-4-8", "high", 10, false},
+		{"claude-opus-4-8-thinking-high-fast", "claude-opus-4-8", "high", 31, false},
+		{"gemini-3.6-flash-minimal", "gemini-3.6-flash", "minimal", 10, false},
+		{"claude-4.5-sonnet-thinking", "claude-4.5-sonnet", "thinking", 10, false},
+		{"claude-opus-4-8-xhigh", "claude-opus-4-8", "xhigh", 10, false},
+		{"claude-4.5-sonnet", "claude-4.5-sonnet", "default", 0, true},
+		{"gpt-5.3-codex", "gpt-5.3-codex", "default", 0, true},
+		{"gpt-5.4-mini-none", "gpt-5.4-mini", "default", 10, false},
+		{"some-max-model", "some-max-model", "default", 0, true},
+		{"ns/model-low", "ns/model", "low", 10, false},
+		{"model-HIGH", "model", "high", 10, false},
 	} {
-		base, kind := splitVariant(tc.id)
-		if base != tc.base || kind != tc.kind {
-			t.Errorf("%s: got (%s, %s) want (%s, %s)", tc.id, base, kind, tc.base, tc.kind)
+		base, kind, rank, bare := analyseVariant(tc.id)
+		if base != tc.base || kind != tc.kind || rank != tc.rank || bare != tc.bare {
+			t.Errorf("%s: got (%s, %s, %d, %v) want (%s, %s, %d, %v)",
+				tc.id, base, kind, rank, bare, tc.base, tc.kind, tc.rank, tc.bare)
 		}
 	}
 }
 
 func TestGroupVariantsCollapse(t *testing.T) {
+	// Families merge whatever the display names say: the v8 list drops
+	// provider display names, so only the base ID keeps rows distinct.
 	rows := []*pb.ModelDetails{
-		{ModelId: "claude-opus-4-8-low", DisplayName: "Claude Opus 4.8"},
-		{ModelId: "claude-opus-4-8-high", DisplayName: "Claude Opus 4.8"},
+		{ModelId: "claude-opus-4-8-low", DisplayName: "Claude Opus 4.8 1M Low"},
+		{ModelId: "claude-opus-4-8-high", DisplayName: "Claude Opus 4.8 1M"},
+		{ModelId: "claude-opus-4-8-high-fast", DisplayName: "Claude Opus 4.8 1M Fast"},
+		{ModelId: "claude-opus-4-8-thinking-high", DisplayName: "Claude Opus 4.8 1M Thinking"},
 		{ModelId: "claude-4.5-sonnet", DisplayName: "Claude Sonnet 4.5"},
-		{ModelId: "claude-4.5-sonnet-thinking", DisplayName: "Claude Sonnet 4.5"},
+		{ModelId: "claude-4.5-sonnet-thinking", DisplayName: "Claude Sonnet 4.5 Thinking"},
 		{ModelId: "gemini-3.1-pro", DisplayName: "Gemini 3.1 Pro"},
 	}
 	groups := groupVariants(rows)
 	if len(groups) != 3 {
 		t.Fatalf("groups = %d, want 3", len(groups))
 	}
-	if groups[0].base != "claude-opus-4-8" || len(groups[0].ids) != 2 {
-		t.Fatalf("opus group: %#v", groups[0])
+	opus := groups[0]
+	if opus.base != "claude-opus-4-8" {
+		t.Fatalf("opus group: %#v", opus)
 	}
-	if groups[1].ids["default"] != "claude-4.5-sonnet" || groups[1].ids["thinking"] != "claude-4.5-sonnet-thinking" {
-		t.Fatalf("sonnet group: %#v", groups[1])
+	if opus.ids["low"] != "claude-opus-4-8-low" || opus.ids["high"] != "claude-opus-4-8-high" || opus.ids["thinking"] != "" {
+		t.Fatalf("opus kinds prefer standard tier: %#v", opus.ids)
+	}
+	if !opus.hasBare && len(advertisedLevels(opus)) != 6 {
+		t.Fatalf("effort group should advertise six levels: %#v", opus)
+	}
+	sonnet := groups[1]
+	if sonnet.ids["default"] != "claude-4.5-sonnet" || sonnet.ids["thinking"] != "claude-4.5-sonnet-thinking" || !sonnet.hasBare {
+		t.Fatalf("sonnet group: %#v", sonnet)
 	}
 	if groups[2].base != "gemini-3.1-pro" || len(advertisedLevels(groups[2])) != 0 {
 		t.Fatalf("singleton should not advertise levels: %#v", groups[2])
 	}
-	if len(advertisedLevels(groups[0])) != 6 {
-		t.Fatalf("effort group should advertise six levels: %#v", groups[0])
-	}
 }
 
-func TestGroupVariantsMismatchedBaseStaysSeparate(t *testing.T) {
+func TestGroupVariantsDistinctFamiliesStaySeparate(t *testing.T) {
 	rows := []*pb.ModelDetails{
 		{ModelId: "alpha-1", DisplayName: "Shared"},
 		{ModelId: "beta-2", DisplayName: "Shared"},
 	}
 	groups := groupVariants(rows)
 	if len(groups) != 2 || groups[0].base != "alpha-1" || groups[1].base != "beta-2" {
-		t.Fatalf("mismatched bases must not collapse: %#v", groups)
+		t.Fatalf("distinct families must not collapse: %#v", groups)
 	}
 }
 
