@@ -135,17 +135,17 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 	if err != nil {
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
-	built, err := buildRequest(req)
-	if err != nil {
-		release()
-		return pluginapi.ExecutorStreamResponse{}, err
-	}
 	variant, err := e.resolveExecutionModel(ctx, req)
 	if err != nil {
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
 	req.Model = variant
+	built, err := buildRequest(req)
+	if err != nil {
+		release()
+		return pluginapi.ExecutorStreamResponse{}, err
+	}
 	chunks := make(chan pluginapi.ExecutorStreamChunk, 8)
 	ready := make(chan error, 1)
 	var readyOnce sync.Once
