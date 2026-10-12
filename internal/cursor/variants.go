@@ -443,13 +443,13 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 	if group == nil {
 		// A suffixed ID from before the switcher (for example
 		// claude-opus-4-8-high) no longer routes; say so explicitly.
-		if family, _, _, _ := analyseVariant(base); family != base {
+		family, _, _, _ := analyseVariant(base)
+		if family != base {
 			if _, ok := table.byBase[family]; ok {
 				return "", fetchTook, errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
 			}
 		}
-		folded, _, _, _ := analyseVariant(base)
-		for _, old := range []string{base, folded} {
+		for _, old := range []string{base, family} {
 			if public, ok := vendorName(old); ok {
 				if g := table.byBase[public]; g != nil && g.renamedFrom == old {
 					return "", fetchTook, errors.New("Cursor model renamed: use " + public + " with an optional (level) suffix")
