@@ -23,12 +23,16 @@ type Config struct {
 	RequestTimeout       int    `yaml:"request-timeout"`
 	LoginTimeout         int    `yaml:"login-timeout"`
 	MaxConcurrentStreams int    `yaml:"max-concurrent-streams"`
+	// ExecutionTimeout bounds one inference run (transcript upload plus the
+	// upstream turn). Agentic transcripts routinely exceed the control-plane
+	// request deadline, so this defaults an order of magnitude higher.
+	ExecutionTimeout int `yaml:"execution-timeout"`
 	// Priority is written by CPA's plugin host for every plugin and is not used by this provider.
 	Priority int `yaml:"priority"`
 }
 
 func DefaultConfig() Config {
-	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32}
+	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32, ExecutionTimeout: 600}
 }
 
 // WithDefaults fills optional zero values without changing Enabled.
@@ -51,6 +55,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.MaxConcurrentStreams == 0 {
 		c.MaxConcurrentStreams = d.MaxConcurrentStreams
+	}
+	if c.ExecutionTimeout == 0 {
+		c.ExecutionTimeout = d.ExecutionTimeout
 	}
 	return c
 }
@@ -78,7 +85,7 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
-	if c.RequestTimeout < 1 || c.RequestTimeout > 3600 || c.LoginTimeout < 1 || c.LoginTimeout > 3600 || c.MaxConcurrentStreams < 1 || c.MaxConcurrentStreams > 1024 {
+	if c.RequestTimeout < 1 || c.RequestTimeout > 3600 || c.LoginTimeout < 1 || c.LoginTimeout > 3600 || c.MaxConcurrentStreams < 1 || c.MaxConcurrentStreams > 1024 || c.ExecutionTimeout < 1 || c.ExecutionTimeout > 3600 {
 		return errors.New("cursor configuration limits are out of range")
 	}
 	if strings.TrimSpace(c.ClientVersion) == "" || strings.ContainsAny(c.ClientVersion, "\r\n") || len(c.ClientVersion) > 128 {

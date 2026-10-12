@@ -25,6 +25,7 @@ plugins:
       request-timeout: 30
       login-timeout: 300
       max-concurrent-streams: 32
+      execution-timeout: 600
 ```
 
 CPA also writes a host-owned `priority` key into this block; the plugin accepts it and ignores it. Other unknown keys are rejected.
