@@ -60,7 +60,8 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 			continue
 		}
 		tables[group.base] = group
-		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, Name: group.base})
+		// Every Cursor agent model answers in text through this executor.
+		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, Name: group.base, SupportedOutputModalities: []string{"text"}})
 	}
 	// Warm the executor's switcher table: discovery already holds it.
 	e.variantMu.Lock()

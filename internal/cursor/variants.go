@@ -124,10 +124,19 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 	}
 	out := make([]*variantGroup, 0, len(order))
 	for _, base := range order {
-		out = append(out, byBase[base])
+		group := byBase[base]
+		// Cursor vendor-prefixes some third-party families (cursor-grok-4.6)
+		// but not others (grok-4.7); publish the vendor name so catalogues
+		// match. Upstream variant IDs keep the prefix.
+		if public, ok := strings.CutPrefix(base, cursorVendorPrefix); ok && public != "" && byBase[public] == nil {
+			group.base = public
+		}
+		out = append(out, group)
 	}
 	return out
 }
+
+const cursorVendorPrefix = "cursor-"
 
 // defaultVariantID selects the no-effort variant: the bare ID when present,
 // otherwise medium, high, low, max, minimal, xhigh, thinking, in that order.
@@ -419,6 +428,11 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 		if family, _, _, _ := analyseVariant(base); family != base {
 			if _, ok := table.byBase[family]; ok {
 				return "", fetchTook, errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
+			}
+		}
+		if public, ok := strings.CutPrefix(base, cursorVendorPrefix); ok {
+			if _, found := table.byBase[public]; found {
+				return "", fetchTook, errors.New("Cursor model renamed: use " + public)
 			}
 		}
 		return "", fetchTook, errors.New("unknown cursor model")

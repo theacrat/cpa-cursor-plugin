@@ -595,4 +595,7 @@ func TestModelsUseHostAndOfficialPath(t *testing.T) {
 	if len(response.Models) != 1 || response.Models[0].ID != "model" {
 		t.Fatalf("wrong discovery %v", response)
 	}
+	if got := response.Models[0].SupportedOutputModalities; len(got) != 1 || got[0] != "text" {
+		t.Fatalf("output modalities = %v, want [text]", got)
+	}
 }
