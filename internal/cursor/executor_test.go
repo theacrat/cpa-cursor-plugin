@@ -277,14 +277,16 @@ func TestStreamChunksOmitNullFinishReason(t *testing.T) {
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
 		writeServer(t, w, update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_TextDelta{TextDelta: &pb.TextDeltaUpdate{Text: "hi"}}}))
-		writeServer(t, w, endTurn())
+		value, _ := structpb.NewValue("example")
+		raw, _ := proto.Marshal(value)
+		writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: 1, Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ToolCallId: "call-one", Args: map[string][]byte{"query": raw}}}}}})
 	})
 	stream, err := e.ExecuteStream(context.Background(), testRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var datas, dones int
-	var sawTerminalReason bool
+	var datas, dones, terminals int
+	var sawToolCall bool
 	for chunk := range stream.Chunks {
 		if chunk.Err != nil {
 			t.Fatal(chunk.Err)
@@ -311,16 +313,30 @@ func TestStreamChunksOmitNullFinishReason(t *testing.T) {
 				t.Fatalf("chunk choices: %q", line)
 			}
 			choice, _ := choices[0].(map[string]any)
-			if reason, present := choice["finish_reason"]; present {
-				if reason == nil {
-					t.Fatalf("explicit null finish_reason: %q", line)
+			reason, present := choice["finish_reason"]
+			_, hasUsage := body["usage"]
+			if delta, _ := choice["delta"].(map[string]any); delta != nil {
+				if calls, _ := delta["tool_calls"].([]any); len(calls) > 0 {
+					sawToolCall = true
 				}
-				sawTerminalReason = true
+			}
+			if !present {
+				if hasUsage {
+					t.Fatalf("usage outside terminal chunk: %q", line)
+				}
+				continue
+			}
+			terminals++
+			if reason != "tool_calls" {
+				t.Fatalf("terminal reason: %q", line)
+			}
+			if !hasUsage {
+				t.Fatalf("terminal chunk missing usage: %q", line)
 			}
 		}
 	}
-	if datas == 0 || dones != 1 || !sawTerminalReason {
-		t.Fatalf("datas=%d dones=%d terminal=%v", datas, dones, sawTerminalReason)
+	if datas == 0 || dones != 1 || terminals != 1 || !sawToolCall {
+		t.Fatalf("datas=%d dones=%d terminals=%d toolcall=%v", datas, dones, terminals, sawToolCall)
 	}
 }
 
