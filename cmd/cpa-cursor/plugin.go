@@ -30,7 +30,9 @@ type Plugin struct {
 func NewPlugin() *Plugin {
 	cfg := cursor.DefaultConfig()
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Plugin{cfg: cfg, auth: cursor.NewAuthService(cfg), executor: cursor.NewExecutor(cfg), quota: cursor.NewQuotaService(cfg), ctx: ctx, cancel: cancel}
+	executor := cursor.NewExecutor(cfg)
+	executor.Log = func(message string) { hostLog("debug", message) }
+	return &Plugin{cfg: cfg, auth: cursor.NewAuthService(cfg), executor: executor, quota: cursor.NewQuotaService(cfg), ctx: ctx, cancel: cancel}
 }
 
 func (p *Plugin) ApplyLifecycle(raw []byte) error {
@@ -58,6 +60,7 @@ func (p *Plugin) ApplyLifecycle(raw []byte) error {
 	p.cfg = cfg
 	p.auth = cursor.NewAuthService(cfg)
 	p.executor = cursor.NewExecutor(cfg)
+	p.executor.Log = func(message string) { hostLog("debug", message) }
 	p.quota = cursor.NewQuotaService(cfg)
 	p.quiesced = false
 	return nil

@@ -5,11 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+func hostLog(level, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	_, _ = callHost(pluginabi.MethodHostLog, map[string]any{
+		"level":   level,
+		"message": "[" + pluginIdentifier + "] " + message,
+	})
+}
 
 var callHost = func(string, any) (json.RawMessage, error) {
 	return nil, errors.New("host callback is not available")
