@@ -230,6 +230,20 @@ func TestStreamAndCloseDrain(t *testing.T) {
 	}
 }
 
+func TestLeaseUsesExecutionTimeout(t *testing.T) {
+	e := NewExecutor(Config{Enabled: true, ExecutionTimeout: 2})
+	defer e.Close()
+	ctx, release, err := e.lease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > 2*time.Second || time.Until(deadline) <= 0 {
+		t.Fatalf("lease deadline = %v", deadline)
+	}
+}
+
 func TestStreamingHTTPRejectionPreservesStatusBeforeAdmission(t *testing.T) {
 	for _, status := range []int{401, 429, 503} {
 		e := NewExecutor(DefaultConfig())

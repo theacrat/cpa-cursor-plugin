@@ -28,7 +28,7 @@ func TestConfigAcceptsHostInjectedPriority(t *testing.T) {
 func TestConfigRejectsUnsafeOrMalformed(t *testing.T) {
 	for _, raw := range []string{
 		"unknown: true", "enabled: not-bool", "enabled: true\nenabled: false", "---\nenabled: true\n---\nenabled: false",
-		"api-base-url: http://example.com", "api-base-url: https://user:secret@example.com", "api-base-url: https://example.com?q=secret", "api-base-url: https://example.com?", "login-url: https://example.com/#secret", "request-timeout: 0", "login-timeout: -1", "max-concurrent-streams: 2048", "client-version: ''",
+		"api-base-url: http://example.com", "api-base-url: https://user:secret@example.com", "api-base-url: https://example.com?q=secret", "api-base-url: https://example.com?", "login-url: https://example.com/#secret", "request-timeout: 0", "login-timeout: -1", "max-concurrent-streams: 2048", "execution-timeout: 0", "execution-timeout: 3601", "client-version: ''",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ParseConfig([]byte(raw)); err == nil {

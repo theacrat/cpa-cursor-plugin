@@ -56,7 +56,7 @@ func (e *Executor) lease(ctx context.Context) (context.Context, func(), error) {
 		e.mu.Unlock()
 		return nil, nil, errors.New("Cursor provider is disabled")
 	}
-	timeout := e.cfg.RequestTimeout
+	timeout := e.cfg.ExecutionTimeout
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	e.next++
 	id := e.next
