@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -105,7 +104,7 @@ func TestGroupVariantsDropCursorVendorPrefix(t *testing.T) {
 	for _, g := range groupVariants(rows) {
 		byBase[g.base] = g
 	}
-	if g := byBase["grok-4.6"]; g == nil || g.ids["low"] != "cursor-grok-4.6-low" || g.ids["high"] != "cursor-grok-4.6-high" || g.renamedFrom != "cursor-grok-4.6" {
+	if g := byBase["grok-4.6"]; g == nil || g.ids["low"] != "cursor-grok-4.6-low" || g.ids["high"] != "cursor-grok-4.6-high" {
 		t.Fatalf("vendor prefix not dropped or upstream IDs lost: %#v", byBase)
 	}
 	if byBase["cursor-grok-4.6"] != nil || byBase["grok-4.7"] == nil {
@@ -118,10 +117,9 @@ func TestGroupVariantsDropCursorVendorPrefix(t *testing.T) {
 	}
 }
 
-func TestResolveExecutionModelExplainsVendorRename(t *testing.T) {
+func TestResolveExecutionModelRoutesVendorRename(t *testing.T) {
 	table := &variantTable{byBase: map[string]*variantGroup{
-		"grok-4.6": {base: "grok-4.6", renamedFrom: "cursor-grok-4.6", ids: map[string]string{"low": "cursor-grok-4.6-low", "high": "cursor-grok-4.6-high"}},
-		"grok-4.7": {base: "grok-4.7", ids: map[string]string{"high": "grok-4.7-high"}},
+		"grok-4.6": {base: "grok-4.6", ids: map[string]string{"low": "cursor-grok-4.6-low", "high": "cursor-grok-4.6-high"}},
 	}}
 	e, req := warmedExecutor(t, table)
 	for model, want := range map[string]string{"grok-4.6": "cursor-grok-4.6-high", "grok-4.6(low)": "cursor-grok-4.6-low"} {
@@ -130,15 +128,9 @@ func TestResolveExecutionModelExplainsVendorRename(t *testing.T) {
 			t.Fatalf("%s: %q %v, want %q", model, got, err, want)
 		}
 	}
-	for _, old := range []string{"cursor-grok-4.6", "cursor-grok-4.6-high", "cursor-grok-4.6(high)"} {
-		req.Model = old
-		if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || !strings.Contains(err.Error(), "use grok-4.6") {
-			t.Fatalf("%s should explain the rename: %v", old, err)
-		}
-	}
-	req.Model = "cursor-grok-4.7"
-	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || strings.Contains(err.Error(), "renamed") {
-		t.Fatalf("never-prefixed family must not claim a rename: %v", err)
+	req.Model = "cursor-grok-4.6"
+	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
+		t.Fatal("retired upstream base accepted")
 	}
 }
 
@@ -288,7 +280,7 @@ func TestResolveExecutionModel(t *testing.T) {
 	}
 	req.Model = "claude-opus-4-8-high"
 	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
-		t.Fatal("legacy suffixed ID should explain the migration")
+		t.Fatal("legacy suffixed ID accepted")
 	}
 	req.Model = "no-such-model"
 	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
