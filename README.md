@@ -42,7 +42,9 @@ other provider's row and quietly take some of its traffic. Cursor models are
 therefore published as `cursor/<id>` (for example `cursor/claude-opus-5-5`);
 CPA strips the prefix before the request reaches this plugin. Set
 `model-prefix` to choose another namespace, or store `prefix` in a credential
-file to override it per account.
+file to override it per account. The configured default is applied when a
+credential is loaded or logged in, not written to its file; refreshes keep the
+host's current prefix.
 
 With CPA's `force-model-prefix: true`, only the prefixed IDs are registered.
 Without it CPA registers both, so the bare IDs can still collide.
@@ -61,7 +63,7 @@ use the bare variant when one exists, otherwise medium.
 
 Earlier versions registered one row per effort variant
 (`claude-opus-4-8-high`, …). Those IDs are gone; switch saved configs to the
-base ID with an optional `(level)` suffix.
+prefixed base ID with an optional `(level)` suffix.
 
 ## Quota
 

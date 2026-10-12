@@ -147,6 +147,9 @@ func parseStorage(raw []byte) (map[string]any, bool, error) {
 			}
 		}
 	}
+	if v, _ := m["prefix"].(string); v != "" && !validModelPrefix(v) {
+		return nil, true, errors.New("invalid cursor model prefix")
+	}
 	if v, ok := m["refresh_token"].(string); ok && strings.ContainsAny(v, "\r\n") {
 		return nil, true, errors.New("invalid cursor refresh token")
 	}
@@ -263,10 +266,12 @@ func ensureJSONSuffix(name string) string {
 }
 
 // withModelPrefix applies the configured model namespace unless the stored
-// credential names its own.
-func withModelPrefix(a pluginapi.AuthData, cfg Config) pluginapi.AuthData {
+// credential names its own. Refresh deliberately skips it: CPA keeps the
+// auth's current prefix when a refresh returns none, and its refresh request
+// does not carry that prefix, so defaulting here would overwrite host edits.
+func withModelPrefix(a pluginapi.AuthData, prefix string) pluginapi.AuthData {
 	if strings.TrimSpace(a.Prefix) == "" {
-		a.Prefix = cfg.ModelPrefix
+		a.Prefix = prefix
 	}
 	return a
 }
@@ -358,7 +363,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
-	a = withModelPrefix(a, cfg)
+	a = withModelPrefix(a, cfg.ModelPrefix)
 	if name := sanitizeFileName(req.FileName); name != "" {
 		a.FileName = ensureJSONSuffix(name)
 	}
@@ -488,7 +493,7 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	}
 	a, err := authData(m, s.now())
 	if err == nil {
-		a = withModelPrefix(a, cfg)
+		a = withModelPrefix(a, cfg.ModelPrefix)
 		delete(s.sessions, req.State)
 	}
 	return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusSuccess, Auth: a}, err
@@ -541,7 +546,6 @@ func (s *AuthService) RefreshAuth(ctx context.Context, req pluginapi.AuthRefresh
 	if err != nil {
 		return pluginapi.AuthRefreshResponse{}, err
 	}
-	a = withModelPrefix(a, cfg)
 	for k, v := range req.Metadata {
 		a.Metadata[k] = v
 	}

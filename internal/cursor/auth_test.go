@@ -116,9 +116,17 @@ func TestAuthModelPrefixDefaultsToConfig(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"accessToken": fixtureJWT("user-1", now.Add(time.Hour))})
 		return pluginapi.HTTPResponse{StatusCode: 200, Body: body}, nil
 	}}
+	// Refresh leaves an unstored prefix empty so CPA keeps the auth's current
+	// one, which an operator may have changed on the host.
 	refreshed, err := s.RefreshAuth(context.Background(), pluginapi.AuthRefreshRequest{StorageJSON: keyed, HTTPClient: client})
-	if err != nil || refreshed.Auth.Prefix != "work" {
-		t.Fatalf("refresh dropped the configured prefix: %q %v", refreshed.Auth.Prefix, err)
+	if err != nil || refreshed.Auth.Prefix != "" {
+		t.Fatalf("refresh must not impose the configured prefix: %q %v", refreshed.Auth.Prefix, err)
+	}
+	for _, bad := range []string{"a/b", "has space", "../x"} {
+		raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": "opaque", "id": "fixed", "prefix": bad})
+		if _, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw}); err == nil {
+			t.Fatalf("malformed stored prefix %q accepted", bad)
+		}
 	}
 }
 
