@@ -27,6 +27,8 @@ plugins:
       max-concurrent-streams: 32
 ```
 
+CPA also writes a host-owned `priority` key into this block; the plugin accepts it and ignores it. Other unknown keys are rejected.
+
 Restart CPA after installing the library. Endpoint overrides are administrative settings, not request-controlled URLs; only trusted operators should change them.
 
 ## Quota

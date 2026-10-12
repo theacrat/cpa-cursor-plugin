@@ -13,6 +13,18 @@ func TestConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigAcceptsHostInjectedPriority(t *testing.T) {
+	for _, raw := range []string{"enabled: true\npriority: 0\n", "enabled: true\npriority: -5\n"} {
+		c, err := ParseConfig([]byte(raw))
+		if err != nil || !c.Enabled {
+			t.Fatalf("%q rejected: %#v %v", raw, c, err)
+		}
+	}
+	if _, err := ParseConfig([]byte("priority: high\n")); err == nil {
+		t.Fatal("non-integer priority accepted")
+	}
+}
+
 func TestConfigRejectsUnsafeOrMalformed(t *testing.T) {
 	for _, raw := range []string{
 		"unknown: true", "enabled: not-bool", "enabled: true\nenabled: false", "---\nenabled: true\n---\nenabled: false",
