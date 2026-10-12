@@ -23,6 +23,8 @@ type Config struct {
 	RequestTimeout       int    `yaml:"request-timeout"`
 	LoginTimeout         int    `yaml:"login-timeout"`
 	MaxConcurrentStreams int    `yaml:"max-concurrent-streams"`
+	// Priority is written by CPA's plugin host for every plugin and is not used by this provider.
+	Priority int `yaml:"priority"`
 }
 
 func DefaultConfig() Config {

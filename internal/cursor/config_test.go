@@ -11,6 +11,10 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil || c.Enabled || c.RequestTimeout != 42 {
 		t.Fatalf("decode: %#v %v", c, err)
 	}
+	c, err = ParseConfig([]byte("enabled: true\npriority: 0\n"))
+	if err != nil || !c.Enabled {
+		t.Fatalf("host-injected priority rejected: %#v %v", c, err)
+	}
 }
 
 func TestConfigRejectsUnsafeOrMalformed(t *testing.T) {
