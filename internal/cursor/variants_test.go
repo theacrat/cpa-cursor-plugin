@@ -2,6 +2,8 @@ package cursor
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -153,6 +155,40 @@ func TestOriginalEffortFormats(t *testing.T) {
 		req := pluginapi.ExecutorRequest{Model: "m", OriginalRequest: []byte(tc.body), SourceFormat: tc.format}
 		if got := requestEffort(req); got != tc.want {
 			t.Errorf("%s %s: got %q want %q", tc.format, tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestStreamResolvesVariantBeforeBuild(t *testing.T) {
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		initial := readClient(t, r.Body).GetRunRequest()
+		if initial == nil || initial.RequestedModel.ModelId != "base-high" {
+			t.Errorf("stream upstreamed unresolved model: %#v", initial.GetRequestedModel())
+		}
+		w.Header().Set("Content-Type", "application/connect+proto")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		writeServer(t, w, endTurn())
+	}))
+	s.EnableHTTP2 = true
+	s.StartTLS()
+	e := NewExecutor(Config{Enabled: true, APIBaseURL: s.URL, RequestTimeout: 5})
+	e.client = s.Client()
+	e.variants = map[string]variantCacheEntry{
+		variantCacheKey("fixture-secret"): {table: &variantTable{byBase: map[string]*variantGroup{
+			"base": {base: "base", display: "Base", ids: map[string]string{"low": "base-low", "high": "base-high"}},
+		}}, expires: time.Now().Add(variantCacheTTL)},
+	}
+	t.Cleanup(func() { e.Close(); s.Close() })
+	req := testRequest()
+	req.Model = "base(high)"
+	stream, err := e.ExecuteStream(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for chunk := range stream.Chunks {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
 		}
 	}
 }
