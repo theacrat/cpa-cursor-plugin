@@ -31,6 +31,20 @@ CPA also writes a host-owned `priority` key into this block; the plugin accepts 
 
 Restart CPA after installing the library. Endpoint overrides are administrative settings, not request-controlled URLs; only trusted operators should change them.
 
+## Thinking switcher
+
+Each Cursor model appears once, with its reasoning efforts behind CPA's
+native `model(level)` suffix: `claude-opus-4-8` for the default effort,
+`claude-opus-4-8(high)` for high, and so on through `minimal`, `low`,
+`medium`, `high`, `xhigh` and `max`. A plain `reasoning_effort` request
+parameter (or the client's native thinking field) selects the variant too;
+an explicit `(level)` suffix always wins. Requests without any effort signal
+use the bare variant when one exists, otherwise medium.
+
+Earlier versions registered one row per effort variant
+(`claude-opus-4-8-high`, …). Those IDs are gone; switch saved configs to the
+base ID with an optional `(level)` suffix.
+
 ## Quota
 
 The plugin reports Cursor Dashboard usage through the host HTTP transport. It publishes only fields returned by Cursor; monetary values are upstream cents converted to USD, and absent or null limits remain absent. Quota reset is not supported.

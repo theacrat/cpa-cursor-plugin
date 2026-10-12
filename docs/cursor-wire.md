@@ -16,6 +16,11 @@ Production calls require a host client. A test-injected `http.Client` exercises
 native TLS HTTP/2 and `io.Pipe` at `/agent.v1.AgentService/Run` in local protocol
 fixtures; it is not a production fallback. Host callers always use host transport.
 
+Model discovery collapses effort variants into one row per base model and the
+executor resolves the upstream variant per request from the `model(level)`
+suffix, payload `reasoning_effort`, or native client thinking fields
+(see [thinking switcher](thinking-switcher.md)).
+
 Requests rebuild the full caller transcript rather than retaining upstream
 sessions. Completed turn structures and model-visible JSON root prompts are
 both content-addressed into a bounded per-run blob store. System instructions

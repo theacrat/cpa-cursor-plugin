@@ -24,6 +24,10 @@ type Executor struct {
 	slots     chan struct{}
 	// client is only injected by package tests. Production uses host callbacks.
 	client *http.Client
+	// variants caches the effort-variant table per credential for the
+	// thinking switcher. It is filled by discovery and lazily by execution.
+	variantMu sync.Mutex
+	variants  map[string]variantCacheEntry
 }
 
 func (e *Executor) Identifier() string { return "cursor" }
@@ -100,6 +104,11 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 		return pluginapi.ExecutorResponse{}, err
 	}
 	defer release()
+	variant, err := e.resolveExecutionModel(ctx, req)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
+	req.Model = variant
 	built, err := buildRequest(req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
@@ -131,10 +140,12 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
-	if _, err = executorToken(req.StorageJSON, req.AuthMetadata); err != nil {
+	variant, err := e.resolveExecutionModel(ctx, req)
+	if err != nil {
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
+	req.Model = variant
 	chunks := make(chan pluginapi.ExecutorStreamChunk, 8)
 	ready := make(chan error, 1)
 	var readyOnce sync.Once
