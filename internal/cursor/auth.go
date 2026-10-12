@@ -255,6 +255,13 @@ func sanitizeFileName(name string) string {
 	return name
 }
 
+func ensureJSONSuffix(name string) string {
+	if !strings.HasSuffix(strings.ToLower(name), ".json") {
+		name += ".json"
+	}
+	return name
+}
+
 func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	access := stringField(m, "access_token")
 	claims := jwtClaims(access)
@@ -286,10 +293,7 @@ func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	if fileName == "" {
 		return pluginapi.AuthData{}, errors.New("cursor auth requires a usable file name")
 	}
-	if !strings.HasSuffix(strings.ToLower(fileName), ".json") {
-		fileName += ".json"
-	}
-	m["file_name"] = fileName
+	m["file_name"] = ensureJSONSuffix(fileName)
 	if stringField(m, "email") == "" {
 		if email := stringField(claims, "email"); email != "" {
 			m["email"] = email
@@ -346,10 +350,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
 	if name := sanitizeFileName(req.FileName); name != "" {
-		if !strings.HasSuffix(strings.ToLower(name), ".json") {
-			name += ".json"
-		}
-		a.FileName = name
+		a.FileName = ensureJSONSuffix(name)
 	}
 	return pluginapi.AuthParseResponse{Handled: true, Auth: a}, lifecycleError(ctx)
 }
