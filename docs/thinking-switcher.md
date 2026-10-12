@@ -31,10 +31,11 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   `reasoning_effort`, Anthropic `effort`/`thinking`, Gemini `thinkingLevel`,
   Codex `reasoning.effort`), then the base default.
 - Level mapping: exact suffix wins, then the `thinking` variant, then the
-  default. `xhigh` maps to `max`. `none`, `auto` and numeric budgets select
-  the default. Unknown values never fail the request; they select the
-  default. The default is the bare variant when present, otherwise
-  medium, high, low, max, minimal, thinking, in that order.
+  default. `xhigh` prefers a real `xhigh` variant, then `max`. `none`,
+  `auto` and numeric budgets select the default. Unknown values never fail
+  the request; they select the default. The default is the bare variant
+  when present, otherwise medium, high, low, max, minimal, xhigh, thinking,
+  in that order.
 - The variant table is cached per credential (5 minute TTL) and shared
   between discovery and execution. A cold executor fetches it over host HTTP;
   if that fetch fails the request fails instead of guessing a variant ID.
