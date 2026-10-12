@@ -48,6 +48,8 @@ type variantGroup struct {
 	ids     map[string]string
 	rank    map[string]int
 	hasBare bool
+	// renamedFrom is the upstream vendor-prefixed base, when one was dropped.
+	renamedFrom string
 }
 
 // variantTable maps family base IDs to their upstream variants.
@@ -128,15 +130,31 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		// Cursor vendor-prefixes some third-party families (cursor-grok-4.6)
 		// but not others (grok-4.7); publish the vendor name so catalogues
 		// match. Upstream variant IDs keep the prefix.
-		if public, ok := strings.CutPrefix(base, cursorVendorPrefix); ok && public != "" && byBase[public] == nil {
+		if public, ok := vendorName(base); ok && byBase[public] == nil {
 			group.base = public
+			group.renamedFrom = base
 		}
 		out = append(out, group)
 	}
 	return out
 }
 
-const cursorVendorPrefix = "cursor-"
+// prefixedVendorFamilies lists third-party families Cursor publishes under a
+// cursor- prefix. Cursor's own cursor-* models are never renamed.
+var prefixedVendorFamilies = []string{"grok-"}
+
+func vendorName(base string) (string, bool) {
+	public, ok := strings.CutPrefix(base, "cursor-")
+	if !ok {
+		return "", false
+	}
+	for _, family := range prefixedVendorFamilies {
+		if strings.HasPrefix(public, family) && len(public) > len(family) {
+			return public, true
+		}
+	}
+	return "", false
+}
 
 // defaultVariantID selects the no-effort variant: the bare ID when present,
 // otherwise medium, high, low, max, minimal, xhigh, thinking, in that order.
@@ -430,9 +448,12 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 				return "", fetchTook, errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
 			}
 		}
-		if public, ok := strings.CutPrefix(base, cursorVendorPrefix); ok {
-			if _, found := table.byBase[public]; found {
-				return "", fetchTook, errors.New("Cursor model renamed: use " + public)
+		folded, _, _, _ := analyseVariant(base)
+		for _, old := range []string{base, folded} {
+			if public, ok := vendorName(old); ok {
+				if g := table.byBase[public]; g != nil && g.renamedFrom == old {
+					return "", fetchTook, errors.New("Cursor model renamed: use " + public + " with an optional (level) suffix")
+				}
 			}
 		}
 		return "", fetchTook, errors.New("unknown cursor model")

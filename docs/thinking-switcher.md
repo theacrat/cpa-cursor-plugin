@@ -42,10 +42,12 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
 - Legacy suffixed IDs (`claude-opus-4-8-high`) are no longer registered, so
   saved configs must switch to the base ID with an optional `(level)` suffix.
   This is an intentional breaking change for a usable list.
-- Families Cursor vendor-prefixes (`cursor-grok-4.6-*`) publish without the
-  `cursor-` prefix (`grok-4.6`) so public catalogues such as models.dev match,
-  unless a plain family already owns that name. Upstream variant IDs keep the
-  prefix; the old prefixed base ID fails with a rename hint.
+- Third-party families Cursor vendor-prefixes (currently Grok:
+  `cursor-grok-4.6-*`) publish without the `cursor-` prefix (`grok-4.6`) so
+  public catalogues such as models.dev match, unless a plain family already
+  owns that name. Cursor's own `cursor-*` models are untouched. Upstream
+  variant IDs keep the prefix. This is a breaking rename: old prefixed IDs,
+  with or without an effort suffix, fail with a hint naming the new ID.
 - Every published row declares `text` output modality: Cursor agent models
   only answer in text through this executor.
 

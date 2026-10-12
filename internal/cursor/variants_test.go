@@ -97,38 +97,48 @@ func TestGroupVariantsDropCursorVendorPrefix(t *testing.T) {
 		{ModelId: "cursor-grok-4.6-low", DisplayName: "Grok 4.6 Low"},
 		{ModelId: "cursor-grok-4.6-high", DisplayName: "Grok 4.6"},
 		{ModelId: "grok-4.7-medium", DisplayName: "Grok 4.7"},
-		{ModelId: "cursor-clash", DisplayName: "Prefixed"},
-		{ModelId: "clash", DisplayName: "Plain"},
-		{ModelId: "cursor-", DisplayName: "Bare prefix"},
+		{ModelId: "cursor-grok-4.7-low", DisplayName: "Prefixed clash"},
+		{ModelId: "cursor-native-1", DisplayName: "Cursor own model"},
+		{ModelId: "cursor-grok-", DisplayName: "Bare family"},
 	}
 	byBase := map[string]*variantGroup{}
 	for _, g := range groupVariants(rows) {
 		byBase[g.base] = g
 	}
-	if g := byBase["grok-4.6"]; g == nil || g.ids["low"] != "cursor-grok-4.6-low" || g.ids["high"] != "cursor-grok-4.6-high" {
+	if g := byBase["grok-4.6"]; g == nil || g.ids["low"] != "cursor-grok-4.6-low" || g.ids["high"] != "cursor-grok-4.6-high" || g.renamedFrom != "cursor-grok-4.6" {
 		t.Fatalf("vendor prefix not dropped or upstream IDs lost: %#v", byBase)
 	}
 	if byBase["cursor-grok-4.6"] != nil || byBase["grok-4.7"] == nil {
 		t.Fatalf("unexpected families: %#v", byBase)
 	}
-	// A plain family that already owns the public name keeps it.
-	if byBase["cursor-clash"] == nil || byBase["clash"] == nil || byBase["cursor-"] == nil {
-		t.Fatalf("collision or bare prefix renamed: %#v", byBase)
+	// A plain family that already owns the public name keeps it; Cursor's
+	// own cursor-* models and a bare vendor prefix are never renamed.
+	if byBase["cursor-grok-4.7"] == nil || byBase["cursor-native-1"] == nil || byBase["cursor-grok-"] == nil {
+		t.Fatalf("collision, own model or bare prefix renamed: %#v", byBase)
 	}
 }
 
 func TestResolveExecutionModelExplainsVendorRename(t *testing.T) {
 	table := &variantTable{byBase: map[string]*variantGroup{
-		"grok-4.6": {base: "grok-4.6", ids: map[string]string{"high": "cursor-grok-4.6-high"}},
+		"grok-4.6": {base: "grok-4.6", renamedFrom: "cursor-grok-4.6", ids: map[string]string{"low": "cursor-grok-4.6-low", "high": "cursor-grok-4.6-high"}},
+		"grok-4.7": {base: "grok-4.7", ids: map[string]string{"high": "grok-4.7-high"}},
 	}}
 	e, req := warmedExecutor(t, table)
-	req.Model = "grok-4.6"
-	if got, _, err := e.resolveExecutionModel(context.Background(), req); err != nil || got != "cursor-grok-4.6-high" {
-		t.Fatalf("public name: %q %v", got, err)
+	for model, want := range map[string]string{"grok-4.6": "cursor-grok-4.6-high", "grok-4.6(low)": "cursor-grok-4.6-low"} {
+		req.Model = model
+		if got, _, err := e.resolveExecutionModel(context.Background(), req); err != nil || got != want {
+			t.Fatalf("%s: %q %v, want %q", model, got, err, want)
+		}
 	}
-	req.Model = "cursor-grok-4.6"
-	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || !strings.Contains(err.Error(), "use grok-4.6") {
-		t.Fatalf("old prefixed ID should explain the rename: %v", err)
+	for _, old := range []string{"cursor-grok-4.6", "cursor-grok-4.6-high"} {
+		req.Model = old
+		if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || !strings.Contains(err.Error(), "use grok-4.6") {
+			t.Fatalf("%s should explain the rename: %v", old, err)
+		}
+	}
+	req.Model = "cursor-grok-4.7"
+	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || strings.Contains(err.Error(), "renamed") {
+		t.Fatalf("never-prefixed family must not claim a rename: %v", err)
 	}
 }
 
