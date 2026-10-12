@@ -87,7 +87,52 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 			}
 		}
 	}
+	disambiguateDisplayNames(models)
 	return pluginapi.ModelResponse{Provider: "cursor", Models: models}, nil
+}
+
+// Cursor publishes one row per reasoning-effort variant (for example
+// claude-opus-4-8-low and claude-opus-4-8-high) sharing a single display
+// name. Rows stay selectable by ID, but identical names are unusable in a
+// model picker, so duplicated names gain their effort suffix. Unrecognised
+// duplicates fall back to the full ID rather than guessing.
+func disambiguateDisplayNames(models []pluginapi.ModelInfo) {
+	counts := map[string]int{}
+	for _, m := range models {
+		counts[m.DisplayName]++
+	}
+	seen := map[string]int{}
+	for i := range models {
+		if counts[models[i].DisplayName] < 2 {
+			continue
+		}
+		suffix := effortSuffix(models[i].ID)
+		if suffix == "" {
+			suffix = models[i].ID
+		}
+		name := models[i].DisplayName + " [" + suffix + "]"
+		if seen[name] > 0 {
+			name = models[i].DisplayName + " [" + models[i].ID + "]"
+		}
+		seen[name]++
+		models[i].DisplayName = name
+	}
+}
+
+func effortSuffix(id string) string {
+	segment := id
+	if i := strings.LastIndex(segment, "/"); i >= 0 {
+		segment = segment[i+1:]
+	}
+	if i := strings.LastIndex(segment, "-"); i >= 0 {
+		segment = segment[i+1:]
+	}
+	switch strings.ToLower(segment) {
+	case "low", "medium", "high", "max", "minimal", "thinking":
+		return strings.ToLower(segment)
+	default:
+		return ""
+	}
 }
 
 func availableModelInfo(raw []byte) (map[string]pluginapi.ModelInfo, error) {
