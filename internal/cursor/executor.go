@@ -149,6 +149,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
+	framed := wantsSSEFraming(req.Metadata)
 	chunks := make(chan pluginapi.ExecutorStreamChunk, 8)
 	ready := make(chan error, 1)
 	var readyOnce sync.Once
@@ -176,7 +177,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 				body["usage"] = usage
 			}
 			raw, _ := json.Marshal(body)
-			return send(pluginapi.ExecutorStreamChunk{Payload: append(append([]byte("data: "), raw...), []byte("\n\n")...)})
+			return send(pluginapi.ExecutorStreamChunk{Payload: frameStreamChunk(raw, framed)})
 		}
 		started := false
 		result, err := e.run(ctx, req, built, func(text string, thinking bool) error {
@@ -216,7 +217,9 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		if err := emit(map[string]any{}, reason, result.usage()); err != nil {
 			return
 		}
-		_ = send(pluginapi.ExecutorStreamChunk{Payload: []byte("data: [DONE]\n\n")})
+		if framed {
+			_ = send(pluginapi.ExecutorStreamChunk{Payload: []byte("data: [DONE]\n\n")})
+		}
 	}()
 	if err := <-ready; err != nil {
 		for range chunks {
