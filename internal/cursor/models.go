@@ -52,13 +52,25 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if err := proto.Unmarshal(response.Body, decoded); err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor returned invalid model discovery protobuf")
 	}
-	models := make([]pluginapi.ModelInfo, 0, len(decoded.Models))
-	for _, m := range decoded.Models {
-		if strings.TrimSpace(m.ModelId) == "" {
+	groups := groupVariants(decoded.Models)
+	models := make([]pluginapi.ModelInfo, 0, len(groups))
+	tables := map[string]*variantGroup{}
+	for _, group := range groups {
+		if _, dup := tables[group.base]; dup {
 			continue
 		}
-		models = append(models, pluginapi.ModelInfo{ID: m.ModelId, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: first(m.DisplayName, m.ModelId), Name: m.ModelId})
+		tables[group.base] = group
+		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, Name: group.base})
 	}
+	// Warm the executor's switcher table: discovery already holds it.
+	e.variantMu.Lock()
+	if e.variants == nil {
+		e.variants = map[string]variantCacheEntry{}
+	}
+	if token, err := executorToken(req.StorageJSON, req.Metadata); err == nil {
+		e.variants[variantCacheKey(token)] = variantCacheEntry{table: &variantTable{byBase: tables}, expires: time.Now().Add(variantCacheTTL)}
+	}
+	e.variantMu.Unlock()
 	// The official CLI enriches its usable catalogue with AvailableModels.
 	// Discovery still succeeds when this optional endpoint is unavailable.
 	availableURL, err := endpoint(base, "/aiserver.v1.AiService/AvailableModels")
@@ -76,15 +88,19 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if optionalErr == nil && optional.StatusCode >= 200 && optional.StatusCode < 300 && len(optional.Body) <= maxFrame {
 		if enrichment, err := availableModelInfo(optional.Body); err == nil {
 			for i := range models {
-				if extra, ok := enrichment[models[i].ID]; ok {
-					models[i].ContextLength = extra.ContextLength
-					models[i].InputTokenLimit = extra.InputTokenLimit
-					models[i].SupportedInputModalities = extra.SupportedInputModalities
-					if extra.DisplayName != "" {
-						models[i].DisplayName = extra.DisplayName
-					}
+				extra, ok := enrichment[defaultVariantID(tables[models[i].ID])]
+				if !ok {
+					continue
 				}
+				models[i].ContextLength = extra.ContextLength
+				models[i].InputTokenLimit = extra.InputTokenLimit
+				models[i].SupportedInputModalities = extra.SupportedInputModalities
 			}
+		}
+	}
+	for i := range models {
+		if levels := advertisedLevels(tables[models[i].ID]); len(levels) > 0 {
+			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: tables[models[i].ID].ids[defaultKind] != ""}
 		}
 	}
 	disambiguateDisplayNames(models)

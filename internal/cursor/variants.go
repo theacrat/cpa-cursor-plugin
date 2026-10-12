@@ -1,0 +1,410 @@
+package cursor
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	pb "github.com/theacrat/cpa-cursor-plugin/internal/proto"
+	"google.golang.org/protobuf/proto"
+)
+
+// Canonical thinking levels served by Cursor effort variants.
+const (
+	levelMinimal = "minimal"
+	levelLow     = "low"
+	levelMedium  = "medium"
+	levelHigh    = "high"
+	levelXHigh   = "xhigh"
+	levelMax     = "max"
+)
+
+// effortKinds are Cursor model ID suffixes that denote an effort variant.
+// "thinking" is Cursor's binary thinking toggle, not a canonical level.
+var effortKinds = map[string]bool{
+	levelMinimal: true,
+	levelLow:     true,
+	levelMedium:  true,
+	levelHigh:    true,
+	levelMax:     true,
+	"thinking":   true,
+}
+
+const defaultKind = "default"
+
+// variantGroup is one base model and its known upstream variant IDs by kind.
+type variantGroup struct {
+	base    string
+	display string
+	ids     map[string]string
+}
+
+// variantTable maps collapsed base IDs to their upstream variants.
+type variantTable struct {
+	byBase map[string]*variantGroup
+}
+
+type variantCacheEntry struct {
+	table   *variantTable
+	expires time.Time
+}
+
+// splitVariant divides a discovered model ID into its collapsed base and
+// effort kind. Unknown trailing segments keep the full ID as kind default
+// so unrelated models never merge.
+func splitVariant(id string) (base, kind string) {
+	if i := strings.LastIndex(id, "-"); i > 0 && !strings.HasSuffix(id[:i], "/") {
+		if token := strings.ToLower(id[i+1:]); effortKinds[token] {
+			return id[:i], token
+		}
+	}
+	return id, defaultKind
+}
+
+// groupVariants clusters discovered rows by display name. Only groups whose
+// rows agree on one base collapse; anything else stays separate.
+func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
+	byName := map[string][]*pb.ModelDetails{}
+	order := []string{}
+	for _, row := range rows {
+		if strings.TrimSpace(row.ModelId) == "" {
+			continue
+		}
+		name := first(row.DisplayName, row.ModelId)
+		if _, ok := byName[name]; !ok {
+			order = append(order, name)
+		}
+		byName[name] = append(byName[name], row)
+	}
+	var out []*variantGroup
+	for _, name := range order {
+		members := byName[name]
+		group := &variantGroup{display: name, ids: map[string]string{}}
+		for _, row := range members {
+			base, kind := splitVariant(row.ModelId)
+			if group.base == "" {
+				group.base = base
+			}
+			if group.base != base {
+				group = nil
+				break
+			}
+			if _, dup := group.ids[kind]; !dup {
+				group.ids[kind] = row.ModelId
+			}
+		}
+		if group == nil {
+			for _, row := range members {
+				out = append(out, &variantGroup{base: row.ModelId, display: name, ids: map[string]string{defaultKind: row.ModelId}})
+			}
+			continue
+		}
+		out = append(out, group)
+	}
+	return out
+}
+
+// defaultVariantID selects the no-effort variant: the bare ID when present,
+// otherwise medium, high, low, max, minimal, thinking, in that order.
+func defaultVariantID(group *variantGroup) string {
+	for _, kind := range []string{defaultKind, levelMedium, levelHigh, levelLow, levelMax, levelMinimal, "thinking"} {
+		if id := group.ids[kind]; id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// resolveVariant maps a canonical effort level onto a concrete upstream ID.
+// Unknown, empty, none, auto and numeric efforts select the default; exact
+// suffixes win, then the thinking variant, then the default.
+func resolveVariant(group *variantGroup, effort string) (string, error) {
+	if group == nil {
+		return "", errors.New("unknown cursor model")
+	}
+	def := defaultVariantID(group)
+	if def == "" {
+		return "", errors.New("cursor model has no usable variant")
+	}
+	pick := func(kinds ...string) string {
+		for _, kind := range kinds {
+			if id := group.ids[kind]; id != "" {
+				return id
+			}
+		}
+		return def
+	}
+	switch effort {
+	case "":
+		return def, nil
+	case levelMinimal:
+		return pick(levelMinimal), nil
+	case levelLow:
+		return pick(levelLow, "thinking"), nil
+	case levelMedium:
+		return pick(levelMedium, "thinking"), nil
+	case levelHigh:
+		return pick(levelHigh, "thinking"), nil
+	case levelXHigh:
+		return pick(levelMax, "thinking"), nil
+	case levelMax:
+		return pick(levelMax, "thinking"), nil
+	case "thinking":
+		return pick("thinking"), nil
+	default:
+		return def, nil
+	}
+}
+
+// advertisedLevels lists the canonical levels a collapsed row serves. Only
+// rows with real variants advertise a switcher; bare singletons do not.
+func advertisedLevels(group *variantGroup) []string {
+	multi := false
+	for kind := range group.ids {
+		if kind != defaultKind {
+			multi = true
+			break
+		}
+	}
+	if !multi {
+		return nil
+	}
+	return []string{levelMinimal, levelLow, levelMedium, levelHigh, levelXHigh, levelMax}
+}
+
+// splitModelSuffix divides a requested model into its base and parenthesised
+// thinking suffix following CPA's model(level) convention.
+func splitModelSuffix(model string) (base, suffix string) {
+	model = strings.TrimSpace(model)
+	open := strings.LastIndex(model, "(")
+	if open < 0 || !strings.HasSuffix(model, ")") {
+		return model, ""
+	}
+	return strings.TrimSpace(model[:open]), strings.TrimSpace(model[open+1 : len(model)-1])
+}
+
+// suffixSelection normalises a parenthesised suffix to a canonical effort.
+// Levels pass through; none, auto and numeric budgets explicitly select the
+// default. Absent or unrecognised suffixes are not a selection at all.
+func suffixSelection(suffix string) (string, bool) {
+	lowered := strings.ToLower(strings.TrimSpace(suffix))
+	switch lowered {
+	case levelMinimal, levelLow, levelMedium, levelHigh, levelXHigh, levelMax, "thinking":
+		return lowered, true
+	case "none", "auto":
+		return "", true
+	default:
+		if lowered != "" {
+			if _, err := strconv.Atoi(lowered); err == nil {
+				return "", true
+			}
+		}
+		return "", false
+	}
+}
+
+// payloadSelection reads reasoning_effort from the translated chat payload.
+func payloadSelection(payload []byte) (string, bool) {
+	var body struct {
+		ReasoningEffort any `json:"reasoning_effort"`
+	}
+	if json.Unmarshal(payload, &body) != nil {
+		return "", false
+	}
+	effort, _ := body.ReasoningEffort.(string)
+	return normaliseSelection(effort)
+}
+
+// normaliseSelection maps client effort spellings onto canonical levels and
+// explicit defaults. Unknown values are not a selection.
+func normaliseSelection(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case levelMinimal, levelLow, levelMedium, levelHigh, levelXHigh, levelMax, "thinking":
+		return strings.ToLower(strings.TrimSpace(value)), true
+	case "none", "auto", "off", "disable", "disabled":
+		return "", true
+	default:
+		return "", false
+	}
+}
+
+// originalSelection reads the native thinking field of the client's original
+// request by source format.
+func originalSelection(sourceFormat string, original []byte) (string, bool) {
+	if len(original) == 0 {
+		return "", false
+	}
+	format := strings.ToLower(sourceFormat)
+	var body map[string]any
+	if json.Unmarshal(original, &body) != nil {
+		return "", false
+	}
+	strField := func(m map[string]any, keys ...string) string {
+		for _, key := range keys {
+			if value, _ := m[key].(string); value != "" {
+				return value
+			}
+		}
+		return ""
+	}
+	objField := func(m map[string]any, key string) map[string]any {
+		obj, _ := m[key].(map[string]any)
+		return obj
+	}
+	switch {
+	case strings.Contains(format, "anthropic") || strings.Contains(format, "claude"):
+		if effort, ok := normaliseSelection(strField(body, "effort")); ok {
+			return effort, true
+		}
+		if thinking := objField(body, "thinking"); thinking != nil {
+			if typ, _ := thinking["type"].(string); strings.EqualFold(typ, "enabled") {
+				return "thinking", true
+			}
+			return "", true
+		}
+		return "", false
+	case strings.Contains(format, "gemini"):
+		config := objField(body, "generationConfig")
+		thinking := objField(config, "thinkingConfig")
+		return normaliseSelection(strField(thinking, "thinkingLevel"))
+	case strings.Contains(format, "codex"):
+		return normaliseSelection(strField(objField(body, "reasoning"), "effort"))
+	default:
+		return normaliseSelection(strField(body, "reasoning_effort"))
+	}
+}
+
+// requestEffort resolves the desired effort for one execution. An explicit
+// model(level) suffix wins, then the translated payload, then the native
+// client field, then the default. "" means the default variant.
+func requestEffort(req pluginapi.ExecutorRequest) string {
+	if _, suffix := splitModelSuffix(req.Model); suffix != "" {
+		if effort, ok := suffixSelection(suffix); ok {
+			return effort
+		}
+	}
+	if effort, ok := payloadSelection(req.Payload); ok {
+		return effort
+	}
+	if effort, ok := originalSelection(req.SourceFormat, req.OriginalRequest); ok {
+		return effort
+	}
+	return ""
+}
+
+const variantCacheTTL = 5 * time.Minute
+
+func variantCacheKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// variantTableFor returns the cached variant table for a credential,
+// fetching it over host HTTP on a miss. A failed fetch is an error: the
+// executor must not guess upstream variant IDs.
+func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRequest) (*variantTable, error) {
+	token, err := executorToken(req.StorageJSON, req.AuthMetadata)
+	if err != nil {
+		return nil, err
+	}
+	key := variantCacheKey(token)
+	e.variantMu.Lock()
+	defer e.variantMu.Unlock()
+	if entry, ok := e.variants[key]; ok && time.Now().Before(entry.expires) {
+		return entry.table, nil
+	}
+	rows, err := e.fetchVariantRows(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	table := &variantTable{byBase: map[string]*variantGroup{}}
+	for _, group := range groupVariants(rows) {
+		if _, dup := table.byBase[group.base]; !dup {
+			table.byBase[group.base] = group
+		}
+	}
+	if e.variants == nil {
+		e.variants = map[string]variantCacheEntry{}
+	}
+	e.variants[key] = variantCacheEntry{table: table, expires: time.Now().Add(variantCacheTTL)}
+	return table, nil
+}
+
+// fetchVariantRows runs authenticated model discovery for the executor's own
+// variant mapping. It shares the official discovery route with ModelsForAuth
+// but skips catalogue enrichment, which execution does not need.
+func (e *Executor) fetchVariantRows(ctx context.Context, req pluginapi.ExecutorRequest) ([]*pb.ModelDetails, error) {
+	if req.HTTPClient == nil {
+		return nil, errors.New("Cursor model discovery requires the host HTTP client")
+	}
+	cfg := e.cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	target, err := endpoint(cfg.APIBaseURL, "/aiserver.v1.AiService/GetUsableModels")
+	if err != nil {
+		return nil, err
+	}
+	headers, err := e.headers(req.StorageJSON, req.AuthMetadata, false, uuid())
+	if err != nil {
+		return nil, err
+	}
+	body, _ := proto.Marshal(&pb.GetUsableModelsRequest{})
+	timeout := time.Duration(cfg.RequestTimeout) * time.Second
+	if timeout > 30*time.Second {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	response, err := req.HTTPClient.Do(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: target, Headers: headers, Body: body})
+	if err != nil {
+		return nil, errors.New("Cursor model discovery failed")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, &HTTPStatusError{StatusCode: response.StatusCode}
+	}
+	if len(response.Body) > maxFrame {
+		return nil, errors.New("Cursor model discovery exceeds limit")
+	}
+	decoded := &pb.GetUsableModelsResponse{}
+	if err := proto.Unmarshal(response.Body, decoded); err != nil {
+		return nil, errors.New("Cursor returned invalid model discovery protobuf")
+	}
+	return decoded.Models, nil
+}
+
+// resolveExecutionModel maps the requested model onto a concrete upstream
+// variant ID, honouring the thinking switcher.
+func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.ExecutorRequest) (string, error) {
+	base, _ := splitModelSuffix(req.Model)
+	if strings.TrimSpace(base) == "" {
+		return "", errors.New("Cursor model is required")
+	}
+	table, err := e.variantTableFor(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	group := table.byBase[base]
+	if group == nil {
+		// A bare suffixed ID from before the switcher (for example
+		// claude-opus-4-8-high) no longer routes; say so explicitly.
+		if stem, kind := splitVariant(base); kind != defaultKind {
+			if _, ok := table.byBase[stem]; ok {
+				return "", errors.New("Cursor effort variants moved to the thinking switcher: use " + stem + " with a (level) suffix")
+			}
+		}
+		return "", errors.New("unknown cursor model")
+	}
+	effort := requestEffort(req)
+	if effort == "thinking" && group.ids["thinking"] == "" {
+		effort = ""
+	}
+	return resolveVariant(group, effort)
+}

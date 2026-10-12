@@ -68,8 +68,19 @@ func tlsFixture(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Exec
 	s.StartTLS()
 	e := NewExecutor(Config{Enabled: true, APIBaseURL: s.URL, RequestTimeout: 5})
 	e.client = s.Client()
+	warmFixtureVariants(e)
 	t.Cleanup(func() { e.Close(); s.Close() })
 	return s, e
+}
+
+// warmFixtureVariants pre-populates the switcher table so fixtures exercise
+// the run rather than discovery.
+func warmFixtureVariants(e *Executor) {
+	e.variants = map[string]variantCacheEntry{
+		variantCacheKey("fixture-secret"): {table: &variantTable{byBase: map[string]*variantGroup{
+			"fixture": {base: "fixture", display: "Fixture", ids: map[string]string{defaultKind: "fixture"}},
+		}}, expires: time.Now().Add(variantCacheTTL)},
+	}
 }
 
 func TestNativeHTTP2Duplex(t *testing.T) {
@@ -222,6 +233,7 @@ func TestStreamAndCloseDrain(t *testing.T) {
 func TestStreamingHTTPRejectionPreservesStatusBeforeAdmission(t *testing.T) {
 	for _, status := range []int{401, 429, 503} {
 		e := NewExecutor(DefaultConfig())
+		warmFixtureVariants(e)
 		req := testRequest()
 		req.HTTPClient = fixtureHost{stream: func(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPStreamResponse, error) {
 			return pluginapi.HTTPStreamResponse{StatusCode: status}, nil
@@ -391,6 +403,7 @@ func TestHostRunSSEBidiAppend(t *testing.T) {
 	req := testRequest()
 	req.HTTPClient = h
 	e := NewExecutor(Config{Enabled: true})
+	warmFixtureVariants(e)
 	defer e.Close()
 	if _, err := e.Execute(context.Background(), req); err != nil {
 		t.Fatal(err)
