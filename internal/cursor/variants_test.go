@@ -130,7 +130,7 @@ func TestResolveExecutionModelExplainsVendorRename(t *testing.T) {
 			t.Fatalf("%s: %q %v, want %q", model, got, err, want)
 		}
 	}
-	for _, old := range []string{"cursor-grok-4.6", "cursor-grok-4.6-high"} {
+	for _, old := range []string{"cursor-grok-4.6", "cursor-grok-4.6-high", "cursor-grok-4.6(high)"} {
 		req.Model = old
 		if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil || !strings.Contains(err.Error(), "use grok-4.6") {
 			t.Fatalf("%s should explain the rename: %v", old, err)

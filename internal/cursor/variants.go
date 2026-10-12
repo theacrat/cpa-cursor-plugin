@@ -143,6 +143,8 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 // cursor- prefix. Cursor's own cursor-* models are never renamed.
 var prefixedVendorFamilies = []string{"grok-"}
 
+// vendorName returns the unprefixed public base for a vendor-prefixed
+// third-party family, or false when base is not one.
 func vendorName(base string) (string, bool) {
 	public, ok := strings.CutPrefix(base, "cursor-")
 	if !ok {
