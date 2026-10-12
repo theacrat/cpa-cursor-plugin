@@ -66,6 +66,32 @@ func TestParseAuth(t *testing.T) {
 	}
 }
 
+func TestAuthFileNameAlwaysHasJSONSuffix(t *testing.T) {
+	s, now := fixtureService(t)
+	token := fixtureJWT("user-1", now.Add(time.Hour))
+	// Login-produced records carry no file name; the host would otherwise
+	// persist them under the bare auth ID, which its *.json rescan skips.
+	raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": token, "refresh_token": "refresh-secret"})
+	r, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil || !r.Handled {
+		t.Fatalf("parse: %#v %v", r, err)
+	}
+	if r.Auth.FileName != r.Auth.ID+".json" {
+		t.Fatalf("file name = %q, want %q", r.Auth.FileName, r.Auth.ID+".json")
+	}
+	// Stored names are sanitised to stay inside the auth directory.
+	raw, _ = json.Marshal(map[string]any{"type": "cursor", "access_token": token, "refresh_token": "r", "file_name": "../../evil"})
+	r, err = s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil || r.Auth.FileName != "evil.json" {
+		t.Fatalf("sanitised file name = %#v %v", r.Auth, err)
+	}
+	// Host-provided names keep working and gain the suffix when missing.
+	r, err = s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw, FileName: "host-name"})
+	if err != nil || r.Auth.FileName != "host-name.json" {
+		t.Fatalf("host file name = %#v %v", r.Auth, err)
+	}
+}
+
 func TestLoginPKCEPendingSuccessReplay(t *testing.T) {
 	s, now := fixtureService(t)
 	start, err := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})
