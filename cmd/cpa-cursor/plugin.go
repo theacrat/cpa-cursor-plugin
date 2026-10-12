@@ -92,6 +92,7 @@ func (p *Plugin) Registration() map[string]any {
 			{Name: "request-timeout", Type: pluginapi.ConfigFieldTypeInteger, Description: "Upstream control-plane deadline in seconds. Default 30."},
 			{Name: "execution-timeout", Type: pluginapi.ConfigFieldTypeInteger, Description: "Deadline in seconds for one inference run. Default 600."},
 			{Name: "login-timeout", Type: pluginapi.ConfigFieldTypeInteger, Description: "Login session lifetime in seconds. Default 300."},
+			{Name: "model-prefix", Type: pluginapi.ConfigFieldTypeString, Description: "Namespace for Cursor model IDs, e.g. cursor/claude-opus-5-5, so they never shadow another provider's models. A credential's stored prefix wins. Default cursor."},
 			{Name: "max-concurrent-streams", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum concurrent inference streams. Default 32."},
 		}},
 		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "quota_provider": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions"}},

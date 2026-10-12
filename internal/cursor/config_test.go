@@ -28,7 +28,7 @@ func TestConfigAcceptsHostInjectedPriority(t *testing.T) {
 func TestConfigRejectsUnsafeOrMalformed(t *testing.T) {
 	for _, raw := range []string{
 		"unknown: true", "enabled: not-bool", "enabled: true\nenabled: false", "---\nenabled: true\n---\nenabled: false",
-		"api-base-url: http://example.com", "api-base-url: https://user:secret@example.com", "api-base-url: https://example.com?q=secret", "api-base-url: https://example.com?", "login-url: https://example.com/#secret", "request-timeout: 0", "login-timeout: -1", "max-concurrent-streams: 2048", "execution-timeout: 0", "execution-timeout: 3601", "client-version: ''",
+		"api-base-url: http://example.com", "api-base-url: https://user:secret@example.com", "api-base-url: https://example.com?q=secret", "api-base-url: https://example.com?", "login-url: https://example.com/#secret", "request-timeout: 0", "login-timeout: -1", "max-concurrent-streams: 2048", "execution-timeout: 0", "execution-timeout: 3601", "client-version: ''", "model-prefix: ''", "model-prefix: a/b", "model-prefix: 'has space'",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ParseConfig([]byte(raw)); err == nil {
@@ -43,5 +43,18 @@ func TestLoopbackEndpoints(t *testing.T) {
 		if err := validateURL(raw); err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
+	}
+}
+
+func TestConfigModelPrefix(t *testing.T) {
+	if DefaultConfig().ModelPrefix != "cursor" {
+		t.Fatalf("default prefix = %q", DefaultConfig().ModelPrefix)
+	}
+	c, err := ParseConfig([]byte("model-prefix: work_1.x\n"))
+	if err != nil || c.ModelPrefix != "work_1.x" {
+		t.Fatalf("custom prefix: %#v %v", c, err)
+	}
+	if (Config{}).WithDefaults().ModelPrefix != "cursor" {
+		t.Fatal("WithDefaults left the prefix empty")
 	}
 }

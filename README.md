@@ -26,17 +26,34 @@ plugins:
       login-timeout: 300
       max-concurrent-streams: 32
       execution-timeout: 600
+      model-prefix: cursor
 ```
 
 CPA also writes a host-owned `priority` key into this block; the plugin accepts it and ignores it. Other unknown keys are rejected.
 
 Restart CPA after installing the library. Endpoint overrides are administrative settings, not request-controlled URLs; only trusted operators should change them.
 
+## Model IDs
+
+Cursor serves many models that other providers also serve under the same ID,
+such as `claude-opus-5-5`. CPA keeps one registry row per ID and routes a bare
+ID to any provider registering it, so unprefixed Cursor models would hide the
+other provider's row and quietly take some of its traffic. Cursor models are
+therefore published as `cursor/<id>` (for example `cursor/claude-opus-5-5`);
+CPA strips the prefix before the request reaches this plugin. Set
+`model-prefix` to choose another namespace, or store `prefix` in a credential
+file to override it per account.
+
+With CPA's `force-model-prefix: true`, only the prefixed IDs are registered.
+Without it CPA registers both, so the bare IDs can still collide.
+
+This is a breaking change: saved configs must switch to `cursor/<id>`.
+
 ## Thinking switcher
 
 Each Cursor model appears once, with its reasoning efforts behind CPA's
-native `model(level)` suffix: `claude-opus-4-8` for the default effort,
-`claude-opus-4-8(high)` for high, and so on through `minimal`, `low`,
+native `model(level)` suffix: `cursor/claude-opus-4-8` for the default effort,
+`cursor/claude-opus-4-8(high)` for high, and so on through `minimal`, `low`,
 `medium`, `high`, `xhigh` and `max`. A plain `reasoning_effort` request
 parameter (or the client's native thinking field) selects the variant too;
 an explicit `(level)` suffix always wins. Requests without any effort signal

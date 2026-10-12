@@ -27,12 +27,17 @@ type Config struct {
 	// upstream turn). Agentic transcripts routinely exceed the control-plane
 	// request deadline, so this defaults an order of magnitude higher.
 	ExecutionTimeout int `yaml:"execution-timeout"`
+	// ModelPrefix namespaces this provider's model IDs (cursor/claude-opus-5-5)
+	// so they never shadow another provider serving the same base ID. CPA
+	// registers the prefixed IDs and strips the prefix before execution. A
+	// credential's own stored prefix takes precedence.
+	ModelPrefix string `yaml:"model-prefix"`
 	// Priority is written by CPA's plugin host for every plugin and is not used by this provider.
 	Priority int `yaml:"priority"`
 }
 
 func DefaultConfig() Config {
-	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32, ExecutionTimeout: 600}
+	return Config{Enabled: true, APIBaseURL: "https://api2.cursor.sh", LoginURL: "https://cursor.com/loginDeepControl", ClientVersion: DefaultClientVersion, RequestTimeout: 30, LoginTimeout: 300, MaxConcurrentStreams: 32, ExecutionTimeout: 600, ModelPrefix: "cursor"}
 }
 
 // WithDefaults fills optional zero values without changing Enabled.
@@ -58,6 +63,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.ExecutionTimeout == 0 {
 		c.ExecutionTimeout = d.ExecutionTimeout
+	}
+	if c.ModelPrefix == "" {
+		c.ModelPrefix = d.ModelPrefix
 	}
 	return c
 }
@@ -91,6 +99,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.ClientVersion) == "" || strings.ContainsAny(c.ClientVersion, "\r\n") || len(c.ClientVersion) > 128 {
 		return errors.New("invalid cursor client version")
 	}
+	if !validModelPrefix(c.ModelPrefix) {
+		return errors.New("invalid cursor model prefix")
+	}
 	return nil
 }
 
@@ -107,4 +118,17 @@ func validateURL(raw string) error {
 		return errors.New("cursor endpoints require HTTPS (except loopback)")
 	}
 	return nil
+}
+
+// validModelPrefix accepts one path segment, as CPA joins it with "/".
+func validModelPrefix(prefix string) bool {
+	if prefix == "" || len(prefix) > 64 {
+		return false
+	}
+	for _, r := range prefix {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }

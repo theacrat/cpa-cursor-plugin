@@ -262,6 +262,15 @@ func ensureJSONSuffix(name string) string {
 	return name
 }
 
+// withModelPrefix applies the configured model namespace unless the stored
+// credential names its own.
+func withModelPrefix(a pluginapi.AuthData, cfg Config) pluginapi.AuthData {
+	if strings.TrimSpace(a.Prefix) == "" {
+		a.Prefix = cfg.ModelPrefix
+	}
+	return a
+}
+
 func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	access := stringField(m, "access_token")
 	claims := jwtClaims(access)
@@ -340,7 +349,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil || !handled {
 		return pluginapi.AuthParseResponse{Handled: handled}, err
 	}
-	ctx, _, done, err := s.begin(ctx)
+	ctx, cfg, done, err := s.begin(ctx)
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
@@ -349,6 +358,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
+	a = withModelPrefix(a, cfg)
 	if name := sanitizeFileName(req.FileName); name != "" {
 		a.FileName = ensureJSONSuffix(name)
 	}
@@ -478,6 +488,7 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	}
 	a, err := authData(m, s.now())
 	if err == nil {
+		a = withModelPrefix(a, cfg)
 		delete(s.sessions, req.State)
 	}
 	return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusSuccess, Auth: a}, err
@@ -530,6 +541,7 @@ func (s *AuthService) RefreshAuth(ctx context.Context, req pluginapi.AuthRefresh
 	if err != nil {
 		return pluginapi.AuthRefreshResponse{}, err
 	}
+	a = withModelPrefix(a, cfg)
 	for k, v := range req.Metadata {
 		a.Metadata[k] = v
 	}
