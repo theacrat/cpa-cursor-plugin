@@ -11,9 +11,17 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil || c.Enabled || c.RequestTimeout != 42 {
 		t.Fatalf("decode: %#v %v", c, err)
 	}
-	c, err = ParseConfig([]byte("enabled: true\npriority: 0\n"))
-	if err != nil || !c.Enabled {
-		t.Fatalf("host-injected priority rejected: %#v %v", c, err)
+}
+
+func TestConfigAcceptsHostInjectedPriority(t *testing.T) {
+	for _, raw := range []string{"enabled: true\npriority: 0\n", "enabled: true\npriority: -5\n"} {
+		c, err := ParseConfig([]byte(raw))
+		if err != nil || !c.Enabled {
+			t.Fatalf("%q rejected: %#v %v", raw, c, err)
+		}
+	}
+	if _, err := ParseConfig([]byte("priority: high\n")); err == nil {
+		t.Fatal("non-integer priority accepted")
 	}
 }
 
