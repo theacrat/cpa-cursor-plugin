@@ -165,7 +165,13 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 			}
 		}
 		emit := func(delta map[string]any, finish any, usage any) error {
-			body := map[string]any{"id": built.id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": built.model, "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
+			choice := map[string]any{"index": 0, "delta": delta}
+			// Strict downstream parsers reject an explicit null
+			// finish_reason; omit it until the terminal chunk.
+			if finish != nil {
+				choice["finish_reason"] = finish
+			}
+			body := map[string]any{"id": built.id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": built.model, "choices": []any{choice}}
 			if usage != nil {
 				body["usage"] = usage
 			}
