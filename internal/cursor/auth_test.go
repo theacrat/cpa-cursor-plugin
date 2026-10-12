@@ -92,6 +92,44 @@ func TestAuthFileNameAlwaysHasJSONSuffix(t *testing.T) {
 	}
 }
 
+func TestAuthModelPrefixPolicy(t *testing.T) {
+	s, now := fixtureService(t)
+	raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": fixtureJWT("user-1", now.Add(time.Hour)), "refresh_token": "r", "prefix": ""})
+	r, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil || r.Auth.Prefix != "cursor" {
+		t.Fatalf("empty stored prefix should take the configured default: %q %v", r.Auth.Prefix, err)
+	}
+	if strings.Contains(string(r.Auth.StorageJSON), `"prefix":"cursor"`) {
+		t.Fatal("configured default must not be written into credential storage")
+	}
+	cfg := DefaultConfig()
+	cfg.ModelPrefix = "work"
+	if err := s.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	r, err = s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil || r.Auth.Prefix != "work" {
+		t.Fatalf("configured prefix not applied: %q %v", r.Auth.Prefix, err)
+	}
+	keyed, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": "old-opaque", "api_key": "dashboard-secret"})
+	client := fakeHTTP{do: func(ctx context.Context, req pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		body, _ := json.Marshal(map[string]any{"accessToken": fixtureJWT("user-1", now.Add(time.Hour))})
+		return pluginapi.HTTPResponse{StatusCode: 200, Body: body}, nil
+	}}
+	// Refresh leaves an unstored prefix empty so CPA keeps the auth's current
+	// one, which an operator may have changed on the host.
+	refreshed, err := s.RefreshAuth(context.Background(), pluginapi.AuthRefreshRequest{StorageJSON: keyed, HTTPClient: client})
+	if err != nil || refreshed.Auth.Prefix != "" {
+		t.Fatalf("refresh must not impose the configured prefix: %q %v", refreshed.Auth.Prefix, err)
+	}
+	for _, bad := range []string{"a/b", "has space", "../x"} {
+		raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": "opaque", "id": "fixed", "prefix": bad})
+		if _, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw}); err == nil {
+			t.Fatalf("malformed stored prefix %q accepted", bad)
+		}
+	}
+}
+
 func TestLoginPKCEPendingSuccessReplay(t *testing.T) {
 	s, now := fixtureService(t)
 	start, err := s.StartLogin(context.Background(), pluginapi.AuthLoginStartRequest{})
@@ -130,7 +168,7 @@ func TestLoginPKCEPendingSuccessReplay(t *testing.T) {
 	}
 	*now = now.Add(time.Second)
 	r, err = s.PollLogin(context.Background(), req)
-	if err != nil || r.Status != pluginapi.AuthLoginStatusSuccess || !strings.Contains(string(r.Auth.StorageJSON), `"selected_team_id":42`) {
+	if err != nil || r.Status != pluginapi.AuthLoginStatusSuccess || !strings.Contains(string(r.Auth.StorageJSON), `"selected_team_id":42`) || r.Auth.Prefix != "cursor" {
 		t.Fatalf("%#v %v", r, err)
 	}
 	r, err = s.PollLogin(context.Background(), req)

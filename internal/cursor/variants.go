@@ -48,8 +48,6 @@ type variantGroup struct {
 	ids     map[string]string
 	rank    map[string]int
 	hasBare bool
-	// renamedFrom is the upstream vendor-prefixed base, when one was dropped.
-	renamedFrom string
 }
 
 // variantTable maps family base IDs to their upstream variants.
@@ -132,7 +130,6 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		// match. Upstream variant IDs keep the prefix.
 		if public, ok := vendorName(base); ok && byBase[public] == nil {
 			group.base = public
-			group.renamedFrom = base
 		}
 		out = append(out, group)
 	}
@@ -443,21 +440,8 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 	}
 	group := table.byBase[base]
 	if group == nil {
-		// A suffixed ID from before the switcher (for example
-		// claude-opus-4-8-high) no longer routes; say so explicitly.
-		family, _, _, _ := analyseVariant(base)
-		if family != base {
-			if _, ok := table.byBase[family]; ok {
-				return "", fetchTook, errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
-			}
-		}
-		for _, old := range []string{base, family} {
-			if public, ok := vendorName(old); ok {
-				if g := table.byBase[public]; g != nil && g.renamedFrom == old {
-					return "", fetchTook, errors.New("Cursor model renamed: use " + public + " with an optional (level) suffix")
-				}
-			}
-		}
+		// CPA only routes registered IDs here, so retired names (per-effort
+		// IDs, cursor-grok-*, unprefixed IDs) never reach this point.
 		return "", fetchTook, errors.New("unknown cursor model")
 	}
 	effort := requestEffort(req)

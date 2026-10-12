@@ -147,6 +147,9 @@ func parseStorage(raw []byte) (map[string]any, bool, error) {
 			}
 		}
 	}
+	if v, _ := m["prefix"].(string); v != "" && !validModelPrefix(v) {
+		return nil, true, errors.New("invalid cursor model prefix")
+	}
 	if v, ok := m["refresh_token"].(string); ok && strings.ContainsAny(v, "\r\n") {
 		return nil, true, errors.New("invalid cursor refresh token")
 	}
@@ -262,6 +265,17 @@ func ensureJSONSuffix(name string) string {
 	return name
 }
 
+// withModelPrefix applies the configured model namespace unless the stored
+// credential names its own. Refresh deliberately skips it: CPA keeps the
+// auth's current prefix when a refresh returns none, and its refresh request
+// does not carry that prefix, so defaulting here would overwrite host edits.
+func withModelPrefix(a pluginapi.AuthData, prefix string) pluginapi.AuthData {
+	if a.Prefix == "" {
+		a.Prefix = prefix
+	}
+	return a
+}
+
 func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	access := stringField(m, "access_token")
 	claims := jwtClaims(access)
@@ -340,7 +354,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil || !handled {
 		return pluginapi.AuthParseResponse{Handled: handled}, err
 	}
-	ctx, _, done, err := s.begin(ctx)
+	ctx, cfg, done, err := s.begin(ctx)
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
@@ -349,6 +363,7 @@ func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequ
 	if err != nil {
 		return pluginapi.AuthParseResponse{Handled: true}, err
 	}
+	a = withModelPrefix(a, cfg.ModelPrefix)
 	if name := sanitizeFileName(req.FileName); name != "" {
 		a.FileName = ensureJSONSuffix(name)
 	}
@@ -478,6 +493,7 @@ func (s *AuthService) PollLogin(ctx context.Context, req pluginapi.AuthLoginPoll
 	}
 	a, err := authData(m, s.now())
 	if err == nil {
+		a = withModelPrefix(a, cfg.ModelPrefix)
 		delete(s.sessions, req.State)
 	}
 	return pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusSuccess, Auth: a}, err

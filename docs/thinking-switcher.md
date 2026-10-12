@@ -46,8 +46,10 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   `cursor-grok-4.6-*`) publish without the `cursor-` prefix (`grok-4.6`) so
   public catalogues such as models.dev match, unless a plain family already
   owns that name. Cursor's own `cursor-*` models are untouched. Upstream
-  variant IDs keep the prefix. This is a breaking rename: old prefixed IDs,
-  with or without an effort suffix, fail with a hint naming the new ID.
+  variant IDs keep the prefix. This is a breaking rename.
+- Published IDs are namespaced by CPA's per-auth prefix (default `cursor/`,
+  see README). CPA routes only registered IDs, so retired names are rejected
+  by the host as unknown models before reaching the plugin.
 - Every published row declares `text` output modality: Cursor agent models
   only answer in text through this executor.
 
