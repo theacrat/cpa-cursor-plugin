@@ -270,73 +270,91 @@ func TestRunLogsTimingWithoutSecrets(t *testing.T) {
 	}
 }
 
-func TestStreamChunksOmitNullFinishReason(t *testing.T) {
-	_, e := tlsFixture(t, func(w http.ResponseWriter, r *http.Request) {
-		readClient(t, r.Body)
-		w.Header().Set("Content-Type", "application/connect+proto")
-		w.WriteHeader(200)
-		w.(http.Flusher).Flush()
-		writeServer(t, w, update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_TextDelta{TextDelta: &pb.TextDeltaUpdate{Text: "hi"}}}))
-		value, _ := structpb.NewValue("example")
-		raw, _ := proto.Marshal(value)
-		writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: 1, Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ToolCallId: "call-one", Args: map[string][]byte{"query": raw}}}}}})
-	})
-	stream, err := e.ExecuteStream(context.Background(), testRequest())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var datas, dones, terminals int
-	var sawToolCall bool
-	for chunk := range stream.Chunks {
-		if chunk.Err != nil {
-			t.Fatal(chunk.Err)
-		}
-		for _, line := range strings.Split(string(chunk.Payload), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
+func TestStreamChunkShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		path   string
+		framed bool
+	}{
+		{"chat completions host-framed", "/v1/chat/completions", false},
+		{"legacy completions host-framed", "/v1/completions/", false},
+		{"messages translated", "/v1/messages", true},
+		{"no path", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, e := tlsFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				readClient(t, r.Body)
+				w.Header().Set("Content-Type", "application/connect+proto")
+				w.WriteHeader(200)
+				w.(http.Flusher).Flush()
+				writeServer(t, w, update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_TextDelta{TextDelta: &pb.TextDeltaUpdate{Text: "hi"}}}))
+				value, _ := structpb.NewValue("example")
+				raw, _ := proto.Marshal(value)
+				writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: 1, Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ToolCallId: "call-one", Args: map[string][]byte{"query": raw}}}}}})
+			})
+			req := testRequest()
+			if tc.path != "" {
+				req.Metadata = map[string]any{"request_path": tc.path}
 			}
-			if line == "data: [DONE]" {
-				dones++
-				continue
+			stream, err := e.ExecuteStream(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.HasPrefix(line, "data: ") {
-				t.Fatalf("non-data line: %q", line)
-			}
-			var body map[string]any
-			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &body); err != nil {
-				t.Fatalf("chunk is not JSON: %q", line)
-			}
-			datas++
-			choices, _ := body["choices"].([]any)
-			if len(choices) != 1 {
-				t.Fatalf("chunk choices: %q", line)
-			}
-			choice, _ := choices[0].(map[string]any)
-			reason, present := choice["finish_reason"]
-			_, hasUsage := body["usage"]
-			if delta, _ := choice["delta"].(map[string]any); delta != nil {
-				if calls, _ := delta["tool_calls"].([]any); len(calls) > 0 {
-					sawToolCall = true
+			var datas, dones, terminals int
+			var sawToolCall bool
+			for chunk := range stream.Chunks {
+				if chunk.Err != nil {
+					t.Fatal(chunk.Err)
+				}
+				payload := string(chunk.Payload)
+				if tc.framed {
+					if !strings.HasPrefix(payload, "data: ") || !strings.HasSuffix(payload, "\n\n") || strings.Count(payload, "data:") != 1 {
+						t.Fatalf("not one SSE frame: %q", payload)
+					}
+					payload = strings.TrimSpace(strings.TrimPrefix(payload, "data: "))
+				} else if strings.Contains(payload, "data:") || strings.Contains(payload, "\n") {
+					t.Fatalf("host-framed chunk carries SSE framing: %q", payload)
+				}
+				if payload == "[DONE]" {
+					dones++
+					continue
+				}
+				var body map[string]any
+				if err := json.Unmarshal([]byte(payload), &body); err != nil {
+					t.Fatalf("chunk is not one JSON object: %q", payload)
+				}
+				datas++
+				choices, _ := body["choices"].([]any)
+				if len(choices) != 1 {
+					t.Fatalf("chunk choices: %q", payload)
+				}
+				choice, _ := choices[0].(map[string]any)
+				reason, present := choice["finish_reason"]
+				_, hasUsage := body["usage"]
+				if delta, _ := choice["delta"].(map[string]any); delta != nil {
+					if calls, _ := delta["tool_calls"].([]any); len(calls) > 0 {
+						sawToolCall = true
+					}
+				}
+				if !present {
+					if hasUsage {
+						t.Fatalf("usage outside terminal chunk: %q", payload)
+					}
+					continue
+				}
+				terminals++
+				if reason != "tool_calls" || !hasUsage {
+					t.Fatalf("terminal chunk: %q", payload)
 				}
 			}
-			if !present {
-				if hasUsage {
-					t.Fatalf("usage outside terminal chunk: %q", line)
-				}
-				continue
+			wantDones := 0
+			if tc.framed {
+				wantDones = 1
 			}
-			terminals++
-			if reason != "tool_calls" {
-				t.Fatalf("terminal reason: %q", line)
+			if datas == 0 || dones != wantDones || terminals != 1 || !sawToolCall {
+				t.Fatalf("datas=%d dones=%d terminals=%d toolcall=%v", datas, dones, terminals, sawToolCall)
 			}
-			if !hasUsage {
-				t.Fatalf("terminal chunk missing usage: %q", line)
-			}
-		}
-	}
-	if datas == 0 || dones != 1 || terminals != 1 || !sawToolCall {
-		t.Fatalf("datas=%d dones=%d terminals=%d toolcall=%v", datas, dones, terminals, sawToolCall)
+		})
 	}
 }
 
