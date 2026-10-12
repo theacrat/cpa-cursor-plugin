@@ -10,6 +10,7 @@ import "strings"
 var hostFramedPaths = []string{"/v1/chat/completions", "/v1/completions"}
 
 func wantsSSEFraming(metadata map[string]any) bool {
+	// CPA's executor.RequestPathMetadataKey; importing it drags in the host.
 	path, _ := metadata["request_path"].(string)
 	path = strings.TrimRight(strings.TrimSpace(path), "/")
 	for _, p := range hostFramedPaths {
