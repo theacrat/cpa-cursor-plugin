@@ -244,6 +244,32 @@ func TestLeaseUsesExecutionTimeout(t *testing.T) {
 	}
 }
 
+func TestRunLogsTimingWithoutSecrets(t *testing.T) {
+	_, e := tlsFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		readClient(t, r.Body)
+		w.Header().Set("Content-Type", "application/connect+proto")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		writeServer(t, w, endTurn())
+	})
+	var lines []string
+	e.Log = func(message string) { lines = append(lines, message) }
+	if _, err := e.Execute(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("log lines = %d, want 1", len(lines))
+	}
+	for _, want := range []string{"run model=fixture", "table_ms=", "open_ms=", "first_ms=", "total_ms=", "in=", "out=", "failed=false"} {
+		if !strings.Contains(lines[0], want) {
+			t.Fatalf("timing line missing %q: %q", want, lines[0])
+		}
+	}
+	if strings.Contains(lines[0], "fixture-secret") {
+		t.Fatalf("credential leaked into timing: %q", lines[0])
+	}
+}
+
 func TestStreamingHTTPRejectionPreservesStatusBeforeAdmission(t *testing.T) {
 	for _, status := range []int{401, 429, 503} {
 		e := NewExecutor(DefaultConfig())

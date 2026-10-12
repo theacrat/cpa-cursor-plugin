@@ -227,20 +227,20 @@ func TestResolveExecutionModel(t *testing.T) {
 		}},
 	}}
 	e, req := warmedExecutor(t, table)
-	got, err := e.resolveExecutionModel(context.Background(), req)
+	got, _, err := e.resolveExecutionModel(context.Background(), req)
 	if err != nil || got != "claude-opus-4-8-medium" {
 		t.Fatalf("default: %q %v", got, err)
 	}
 	req.Model = "claude-opus-4-8(low)"
-	if got, err := e.resolveExecutionModel(context.Background(), req); err != nil || got != "claude-opus-4-8-low" {
+	if got, _, err := e.resolveExecutionModel(context.Background(), req); err != nil || got != "claude-opus-4-8-low" {
 		t.Fatalf("suffix: %q %v", got, err)
 	}
 	req.Model = "claude-opus-4-8-high"
-	if _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
+	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
 		t.Fatal("legacy suffixed ID should explain the migration")
 	}
 	req.Model = "no-such-model"
-	if _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
+	if _, _, err := e.resolveExecutionModel(context.Background(), req); err == nil {
 		t.Fatal("unknown model accepted")
 	}
 }

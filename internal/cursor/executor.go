@@ -28,6 +28,9 @@ type Executor struct {
 	// thinking switcher. It is filled by discovery and lazily by execution.
 	variantMu sync.Mutex
 	variants  map[string]variantCacheEntry
+	// Log receives one diagnostic line per completed run; nil disables it.
+	// It carries timings and byte counts only, never credentials or bodies.
+	Log func(string)
 }
 
 func (e *Executor) Identifier() string { return "cursor" }
@@ -104,7 +107,7 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 		return pluginapi.ExecutorResponse{}, err
 	}
 	defer release()
-	variant, err := e.resolveExecutionModel(ctx, req)
+	variant, tableTook, err := e.resolveExecutionModel(ctx, req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
@@ -113,7 +116,7 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
-	result, err := e.run(ctx, req, built, nil)
+	result, err := e.run(ctx, req, built, nil, tableTook)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
@@ -135,7 +138,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 	if err != nil {
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
-	variant, err := e.resolveExecutionModel(ctx, req)
+	variant, tableTook, err := e.resolveExecutionModel(ctx, req)
 	if err != nil {
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err
@@ -183,7 +186,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 				key = "reasoning_content"
 			}
 			return emit(map[string]any{key: text}, nil, nil)
-		})
+		}, tableTook)
 		if err != nil {
 			admit(err)
 			_ = send(pluginapi.ExecutorStreamChunk{Err: err})

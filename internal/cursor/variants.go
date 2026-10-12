@@ -327,20 +327,22 @@ func variantCacheKey(token string) string {
 // variantTableFor returns the cached variant table for a credential,
 // fetching it over host HTTP on a miss. A failed fetch is an error: the
 // executor must not guess upstream variant IDs.
-func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRequest) (*variantTable, error) {
+func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRequest) (*variantTable, time.Duration, error) {
 	token, err := executorToken(req.StorageJSON, req.AuthMetadata)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	key := variantCacheKey(token)
 	e.variantMu.Lock()
 	defer e.variantMu.Unlock()
 	if entry, ok := e.variants[key]; ok && time.Now().Before(entry.expires) {
-		return entry.table, nil
+		return entry.table, 0, nil
 	}
+	fetchStart := time.Now()
 	rows, err := e.fetchVariantRows(ctx, req)
+	fetchTook := time.Since(fetchStart)
 	if err != nil {
-		return nil, err
+		return nil, fetchTook, err
 	}
 	table := &variantTable{byBase: map[string]*variantGroup{}}
 	for _, group := range groupVariants(rows) {
@@ -352,7 +354,7 @@ func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRe
 		e.variants = map[string]variantCacheEntry{}
 	}
 	e.variants[key] = variantCacheEntry{table: table, expires: time.Now().Add(variantCacheTTL)}
-	return table, nil
+	return table, fetchTook, nil
 }
 
 // fetchVariantRows runs authenticated model discovery for the executor's own
@@ -399,15 +401,16 @@ func (e *Executor) fetchVariantRows(ctx context.Context, req pluginapi.ExecutorR
 }
 
 // resolveExecutionModel maps the requested model onto a concrete upstream
-// variant ID, honouring the thinking switcher.
-func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.ExecutorRequest) (string, error) {
+// variant ID, honouring the thinking switcher. It also reports how long a
+// cold variant-table fetch took so run timings can attribute it.
+func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.ExecutorRequest) (string, time.Duration, error) {
 	base, _ := splitModelSuffix(req.Model)
 	if strings.TrimSpace(base) == "" {
-		return "", errors.New("Cursor model is required")
+		return "", 0, errors.New("Cursor model is required")
 	}
-	table, err := e.variantTableFor(ctx, req)
+	table, fetchTook, err := e.variantTableFor(ctx, req)
 	if err != nil {
-		return "", err
+		return "", fetchTook, err
 	}
 	group := table.byBase[base]
 	if group == nil {
@@ -415,14 +418,15 @@ func (e *Executor) resolveExecutionModel(ctx context.Context, req pluginapi.Exec
 		// claude-opus-4-8-high) no longer routes; say so explicitly.
 		if family, _, _, _ := analyseVariant(base); family != base {
 			if _, ok := table.byBase[family]; ok {
-				return "", errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
+				return "", fetchTook, errors.New("Cursor effort variants moved to the thinking switcher: use " + family + " with a (level) suffix")
 			}
 		}
-		return "", errors.New("unknown cursor model")
+		return "", fetchTook, errors.New("unknown cursor model")
 	}
 	effort := requestEffort(req)
 	if effort == "thinking" && group.ids["thinking"] == "" {
 		effort = ""
 	}
-	return resolveVariant(group, effort)
+	variant, err := resolveVariant(group, effort)
+	return variant, fetchTook, err
 }

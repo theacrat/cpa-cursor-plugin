@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	pb "github.com/theacrat/cpa-cursor-plugin/internal/proto"
@@ -19,6 +21,32 @@ type runResult struct {
 	output, total  int
 }
 
+// runTiming records per-phase run durations for diagnosing slow or stuck
+// upstream turns. It carries byte counts and variant IDs only.
+type runTiming struct {
+	start     time.Time
+	open      time.Duration
+	firstByte time.Duration
+	table     time.Duration
+	inBytes   int
+	outBytes  int
+	failed    bool
+}
+
+func (e *Executor) logTiming(model string, timing runTiming) {
+	if e.Log == nil {
+		return
+	}
+	e.Log("run model=" + model +
+		" table_ms=" + strconv.FormatInt(timing.table.Milliseconds(), 10) +
+		" open_ms=" + strconv.FormatInt(timing.open.Milliseconds(), 10) +
+		" first_ms=" + strconv.FormatInt(timing.firstByte.Milliseconds(), 10) +
+		" total_ms=" + strconv.FormatInt(time.Since(timing.start).Milliseconds(), 10) +
+		" in=" + strconv.Itoa(timing.inBytes) +
+		" out=" + strconv.Itoa(timing.outBytes) +
+		" failed=" + strconv.FormatBool(timing.failed))
+}
+
 func (r runResult) usage() map[string]int {
 	input := r.total - r.output
 	if input < 0 {
@@ -27,11 +55,18 @@ func (r runResult) usage() map[string]int {
 	return map[string]int{"prompt_tokens": input, "completion_tokens": r.output, "total_tokens": input + r.output}
 }
 
-func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error) (runResult, error) {
+func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration) (runResult, error) {
 	// Cancellation closes the host pump before draining it. The child context
 	// also ensures early tool-call completion cancels the host's live stream.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	timing := runTiming{start: time.Now(), table: tableTook, inBytes: len(req.Payload)}
+	done := func(result runResult, err error) (runResult, error) {
+		timing.outBytes = len(result.text) + len(result.thinking)
+		timing.failed = err != nil
+		e.logTiming(b.model, timing)
+		return result, err
+	}
 	var t *runTransport
 	var err error
 	if req.HTTPClient != nil {
@@ -39,25 +74,31 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 	} else if e.client != nil {
 		t, err = e.nativeRun(ctx, req, b)
 	} else {
-		return runResult{}, errors.New("Cursor inference requires the CPA host HTTP client")
+		return done(runResult{}, errors.New("Cursor inference requires the CPA host HTTP client"))
 	}
 	if err != nil {
-		return runResult{}, err
+		return done(runResult{}, err)
 	}
+	timing.open = time.Since(timing.start)
 	defer func() { cancel(); t.close() }()
 	r := runResult{}
 	seen := map[string]bool{}
 	reader := t.reader.(frameReader)
+	first := true
 	for {
 		flags, raw, err := readFrame(reader.Reader, reader.encoding)
+		if first && err == nil {
+			first = false
+			timing.firstByte = time.Since(timing.start)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
-				return r, ctx.Err()
+				return done(r, ctx.Err())
 			}
 			if errors.Is(err, io.EOF) {
-				return r, errors.New("Cursor stream ended before turnEnded")
+				return done(r, errors.New("Cursor stream ended before turnEnded"))
 			}
-			return r, err
+			return done(r, err)
 		}
 		if flags&2 != 0 {
 			var trailer struct {
@@ -66,16 +107,16 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				} `json:"error"`
 			}
 			if json.Unmarshal(raw, &trailer) != nil {
-				return r, errors.New("invalid Cursor Connect trailer")
+				return done(r, errors.New("invalid Cursor Connect trailer"))
 			}
 			if trailer.Error != nil {
-				return r, connectStatus(trailer.Error.Code)
+				return done(r, connectStatus(trailer.Error.Code))
 			}
-			return r, errors.New("Cursor Connect stream ended before turnEnded")
+			return done(r, errors.New("Cursor Connect stream ended before turnEnded"))
 		}
 		msg := &pb.AgentServerMessage{}
 		if proto.Unmarshal(raw, msg) != nil {
-			return r, errors.New("invalid Cursor server protobuf")
+			return done(r, errors.New("invalid Cursor server protobuf"))
 		}
 		switch m := msg.Message.(type) {
 		case *pb.AgentServerMessage_InteractionUpdate:
@@ -83,32 +124,32 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 			case *pb.InteractionUpdate_TextDelta:
 				text := u.TextDelta.Text
 				if len(r.text)+len(text) > maxFrame {
-					return r, errors.New("Cursor output exceeds limit")
+					return done(r, errors.New("Cursor output exceeds limit"))
 				}
 				r.text += text
 				if onText != nil && text != "" {
 					if err := onText(text, false); err != nil {
-						return r, err
+						return done(r, err)
 					}
 				}
 			case *pb.InteractionUpdate_ThinkingDelta:
 				text := u.ThinkingDelta.Text
 				if len(r.thinking)+len(text) > maxFrame {
-					return r, errors.New("Cursor thinking output exceeds limit")
+					return done(r, errors.New("Cursor thinking output exceeds limit"))
 				}
 				r.thinking += text
 				if onText != nil && text != "" {
 					if err := onText(text, true); err != nil {
-						return r, err
+						return done(r, err)
 					}
 				}
 			case *pb.InteractionUpdate_TokenDelta:
 				if u.TokenDelta.Tokens < 0 {
-					return r, errors.New("invalid Cursor token delta")
+					return done(r, errors.New("invalid Cursor token delta"))
 				}
 				r.output += int(u.TokenDelta.Tokens)
 			case *pb.InteractionUpdate_TurnEnded:
-				return r, nil
+				return done(r, nil)
 			}
 		case *pb.AgentServerMessage_ConversationCheckpointUpdate:
 			if detail := m.ConversationCheckpointUpdate.TokenDetails; detail != nil {
@@ -121,19 +162,19 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 			case *pb.KvServerMessage_GetBlobArgs:
 				data, ok := b.blobs.data[hex.EncodeToString(k.GetBlobArgs.BlobId)]
 				if !ok {
-					return r, errors.New("Cursor requested a missing conversation blob; refusing incomplete history")
+					return done(r, errors.New("Cursor requested a missing conversation blob; refusing incomplete history"))
 				}
 				reply.Message = &pb.KvClientMessage_GetBlobResult{GetBlobResult: &pb.GetBlobResult{BlobData: data}}
 			case *pb.KvServerMessage_SetBlobArgs:
 				if err := b.blobs.set(k.SetBlobArgs.BlobId, k.SetBlobArgs.BlobData); err != nil {
-					return r, err
+					return done(r, err)
 				}
 				reply.Message = &pb.KvClientMessage_SetBlobResult{SetBlobResult: &pb.SetBlobResult{}}
 			default:
-				return r, errors.New("unsupported Cursor KV request")
+				return done(r, errors.New("unsupported Cursor KV request"))
 			}
 			if err := t.send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_KvClientMessage{KvClientMessage: reply}}); err != nil {
-				return r, err
+				return done(r, err)
 			}
 		case *pb.AgentServerMessage_ExecServerMessage:
 			exec := m.ExecServerMessage
@@ -152,7 +193,7 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				if !available {
 					result := &pb.ExecClientMessage{Id: exec.Id, ExecId: exec.ExecId, Message: &pb.ExecClientMessage_McpResult{McpResult: &pb.McpResult{Result: &pb.McpResult_ToolNotFound{ToolNotFound: &pb.McpToolNotFound{Name: args.ToolName}}}}}
 					if err := t.send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: result}}); err != nil {
-						return r, err
+						return done(r, err)
 					}
 					continue
 				}
@@ -176,23 +217,23 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				}
 				// OpenAI callers must execute the tool outside this plugin. Stop this run
 				// now; the next call's full transcript carries the result into ResumeAction.
-				return r, nil
+				return done(r, nil)
 			}
 			reply, err := execReply(exec, b.tools)
 			if err != nil {
-				return r, err
+				return done(r, err)
 			}
 			if err := t.send(reply); err != nil {
-				return r, err
+				return done(r, err)
 			}
 		case *pb.AgentServerMessage_InteractionQuery:
 			// These require user approval or an interactive UI not represented by
 			// chat-completions. Fail rather than invent consent or execute a network tool.
-			return r, errors.New("Cursor interaction query requires an unsupported interactive approval flow")
+			return done(r, errors.New("Cursor interaction query requires an unsupported interactive approval flow"))
 		case *pb.AgentServerMessage_ExecServerControlMessage:
 			// Abort notices relate to an individual exec, not necessarily this turn.
 		default:
-			return r, errors.New("unsupported Cursor server message; protocol schema may have changed")
+			return done(r, errors.New("unsupported Cursor server message; protocol schema may have changed"))
 		}
 	}
 }
