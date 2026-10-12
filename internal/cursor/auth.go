@@ -270,7 +270,7 @@ func ensureJSONSuffix(name string) string {
 // auth's current prefix when a refresh returns none, and its refresh request
 // does not carry that prefix, so defaulting here would overwrite host edits.
 func withModelPrefix(a pluginapi.AuthData, prefix string) pluginapi.AuthData {
-	if strings.TrimSpace(a.Prefix) == "" {
+	if a.Prefix == "" {
 		a.Prefix = prefix
 	}
 	return a

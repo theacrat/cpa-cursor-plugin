@@ -92,7 +92,7 @@ func TestAuthFileNameAlwaysHasJSONSuffix(t *testing.T) {
 	}
 }
 
-func TestAuthModelPrefixDefaultsToConfig(t *testing.T) {
+func TestAuthModelPrefixPolicy(t *testing.T) {
 	s, now := fixtureService(t)
 	raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": fixtureJWT("user-1", now.Add(time.Hour)), "refresh_token": "r", "prefix": ""})
 	r, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
