@@ -28,6 +28,8 @@ def main() -> None:
             Path(path).chmod(0o700)
         environment["CPA_HOST_FIXTURE"] = str(directory / "auth.json")
         environment["CPA_THINKING_FIXTURE"] = str(directory / "thinking.json")
+        environment["CPA_MODEL_FIXTURE"] = str(directory / "models.json")
+        environment["CPA_MODEL_LIST_FIXTURE"] = str(directory / "model-list.json")
         replacements = {
             host / "sdk/cliproxy/auth/cursor_contract_test.go": root / "tests/host/refresh_test.go.txt",
             host / "sdk/cliproxy/cursor_contract_test.go": root / "tests/host/models_test.go.txt",
@@ -40,6 +42,7 @@ def main() -> None:
         plugin_overlay.write_text(json.dumps({"Replace": {str(root / "internal/cursor/host_contract_test.go"): str(root / "tests/host/export_test.go.txt")}}))
         run(["go", "test", "-overlay", str(plugin_overlay), "./internal/cursor", "-run", "^TestExportHostFixture$", "-count=1"], root, environment)
         run(["go", "test", "-mod=mod", "-overlay", str(overlay), "./sdk/cliproxy/auth", "./sdk/cliproxy", "-run", "^TestCursor(PluginRefreshPolicy|PrefixKeepsNativeProvidersSeparate)$", "-count=1", "-timeout", "60s"], host, environment)
+        run(["go", "test", "-overlay", str(plugin_overlay), "./internal/cursor", "-run", "^TestRestoreHostModelListMetadata$", "-count=1"], root, environment)
 
 
 if __name__ == "__main__":

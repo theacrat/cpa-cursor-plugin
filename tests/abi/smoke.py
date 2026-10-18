@@ -18,7 +18,7 @@ def main() -> None:
     assert [record["method"] for record in records] == [
         "plugin.register", "auth.identifier", "quota.identifier", "quota.describe",
         "plugin.quiesce", "plugin.reconfigure", "quota.fetch", "plugin.reconfigure",
-        "model.for_auth", "quota.fetch", "quota.reset", "plugin.shutdown",
+        "model.for_auth", "response.intercept_after", "quota.fetch", "quota.reset", "plugin.shutdown",
     ], records
     assert all(record["code"] == 0 for record in records), records
     disabled_fetch = records[6]["response"]
@@ -46,6 +46,8 @@ def main() -> None:
         assert registration["metadata"]["Name"] == "cpa-cursor", registration
         assert registration["capabilities"]["auth_provider"] is True, registration
         assert registration["capabilities"]["quota_provider"] is True, registration
+        assert registration["capabilities"]["response_interceptor"] is True, registration
+    assert not responses["response.intercept_after"]["result"].get("Body")
     for method in ("plugin.quiesce", "plugin.shutdown"):
         assert responses[method]["result"] == {}, responses[method]
     assert "fixture-access" not in result.stdout

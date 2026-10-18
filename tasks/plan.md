@@ -1,31 +1,25 @@
-# provider reliability fixes
+# verified model metadata
 
-Fix the six reproduced review findings without changing upstream protocol behaviour or executing a live login.
+Implement the approved contract in `docs/model-metadata.md` without deployment.
 
 ## decisions
 
-Cursor model discovery requires the host's existing `force-model-prefix` policy, preventing bare-id registration rather than introducing a second namespace system.
-
-Dashboard api-key credentials receive the host-supported refresh interval and current expiry metadata, while browser-only credentials keep their explicit reauthentication behaviour.
-
-Model cache access uses short critical sections and cancellable per-credential in-flight lookups, with network requests outside the cache mutex.
-
-Translated reasoning preserves explicit suffix and payload choices, recovering native thinking only when translation has replaced enabled thinking with an implicit auto selection.
+Use Cursor's authenticated metadata and the executor's verified capabilities, never
+model-name guesses or another provider's limits. Restore metadata stripped by the
+host only for known namespaced Cursor rows, with no network calls on list requests.
 
 ## slices
 
 | slice | acceptance | verification |
 | --- | --- | --- |
-| provider isolation | unsafe host policy returns an empty catalogue before network activity, safe policy preserves prefixed routing | focused discovery tests and native abi smoke |
-| refresh policy | api-key auth remains refreshable after its deadline and refreshed metadata cannot restore stale tokens | auth fixtures and real host scheduler regression |
-| cache concurrency | unrelated accounts stay independent, same-account misses coalesce, waiters cancel promptly | deterministic cache tests and race checks |
-| discovery timeout | control-plane deadline applies without reducing inference execution time | discovery and inference deadline tests |
-| tool identity | raw names and all advertised aliases identify only the intended tool | collision fixtures and executor tool tests |
-| thinking intent | enabled native thinking survives translation while explicit defaults remain defaults | reasoning precedence fixtures |
-| toolchain | patched go version builds and passes the vulnerability scan | complete repository gate and govulncheck |
+| discovery | match upstream family and variant metadata without inventing limits or image support | optional catalogue and malformed protobuf fixtures |
+| reasoning | expose only discovered reasoning controls without changing execution fallback | variant tests |
+| presentation | enrich existing Cursor model-list rows and preserve other providers | list interception and native dispatch fixtures |
+| host contract | preserve metadata through prefixing and host list serialisation | pinned-host fixture |
 
 ## final gate
 
-Review the complete diff, run `mise run check` and govulncheck without concurrent source edits, and retain reproducible evidence for pending review.
+Review the complete diff, then run `mise run check` and `mise run test-host` without
+concurrent source edits.
 
 No remote publish, deployment or live credential use is required.

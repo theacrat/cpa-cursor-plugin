@@ -20,10 +20,12 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   re-duplicate every pair). Trailing `-thinking|-minimal|-low|-medium|-high|`
   `-xhigh|-max|-fast|-none` segments fold into the family; the first
   effort token from the right sets the kind, anything else is kind `default`.
-  One row per family carries `ThinkingSupport` with the servable canonical
+  One row per family carries `ThinkingSupport` with its discovered canonical
   levels, so management clients can render a thinking switcher. Speed-tier
   (`-fast`) and `none` variants fold into the family table rather than the
   list; the standard tier wins each kind.
+  Only discovered effort kinds are advertised, with a thinking-only variant
+  represented by the host-supported `high` level rather than an invented effort list.
 - The executor resolves the variant per request and sends that variant ID
   upstream as `RequestedModel.ModelId`. Effort precedence: `(suffix)` in the
   requested model, then `reasoning_effort` in the chat payload, then the

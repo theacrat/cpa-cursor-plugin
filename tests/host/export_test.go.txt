@@ -34,6 +34,51 @@ func TestExportHostFixture(t *testing.T) {
 	if got := requestEffort(req); got != "thinking" {
 		t.Fatalf("translated native thinking resolved to %q", got)
 	}
+	e := NewExecutor(DefaultConfig())
+	defer e.Close()
+	metadata := modelWireNumber(modelWireString(nil, 1, "review-gpt"), 15, 200000)
+	metadata = modelWireNumber(metadata, 10, 1)
+	metadata = modelWireNumber(metadata, 5, 1)
+	models := discoverMetadata(t, e, "metadata-account", "", variantRows("review-gpt-low", "review-gpt-high"), availableFixture(metadata))
+	encoded, err := json.Marshal(models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("CPA_MODEL_FIXTURE"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRestoreHostModelListMetadata(t *testing.T) {
+	e := NewExecutor(DefaultConfig())
+	defer e.Close()
+	metadata := modelWireNumber(modelWireString(nil, 1, "review-gpt"), 15, 200000)
+	metadata = modelWireNumber(metadata, 10, 1)
+	metadata = modelWireNumber(metadata, 5, 1)
+	discoverMetadata(t, e, "metadata-account", "", variantRows("review-gpt-low", "review-gpt-high"), availableFixture(metadata))
+	response, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: mustReadHostFixture(t, os.Getenv("CPA_MODEL_LIST_FIXTURE")), StatusCode: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &root); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range root.Data {
+		if row["id"] != "cursor/review-gpt" {
+			continue
+		}
+		found = true
+		if row["context_length"] != float64(200000) || row["tool_call"] != true || row["reasoning"] != true || row["modalities"] == nil {
+			t.Fatalf("host list metadata missing: %v", row)
+		}
+	}
+	if !found {
+		t.Fatal("host list lost namespaced Cursor row")
+	}
 }
 
 func mustReadHostFixture(t *testing.T, path string) []byte {

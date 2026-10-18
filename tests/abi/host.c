@@ -91,6 +91,7 @@ int main(int argc, char **argv) {
     call(&api, "quota.fetch", "{}");
     call(&api, "plugin.reconfigure", "{}");
     call(&api, "model.for_auth", "{}");
+    call(&api, "response.intercept_after", "{\"Body\":\"e30=\"}");
     call(&api, "quota.fetch", "{\"provider\":\"cursor\",\"storage_json\":\"eyJ0eXBlIjoiY3Vyc29yIiwiaWQiOiJmaXh0dXJlIiwiYWNjZXNzX3Rva2VuIjoiZml4dHVyZS1hY2Nlc3MifQ==\",\"host_callback_id\":\"fixture-callback\"}");
     call(&api, "quota.reset", "{\"provider\":\"cursor\"}");
     call(&api, "plugin.shutdown", "{}");

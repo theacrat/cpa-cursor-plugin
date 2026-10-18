@@ -95,7 +95,7 @@ func (p *Plugin) Registration() map[string]any {
 			{Name: "model-prefix", Type: pluginapi.ConfigFieldTypeString, Description: "Namespace for Cursor model IDs, e.g. cursor/claude-opus-5-5. Requires top-level force-model-prefix: true. A credential's stored prefix wins. Default cursor."},
 			{Name: "max-concurrent-streams", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum concurrent inference streams. Default 32."},
 		}},
-		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "quota_provider": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions"}},
+		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "quota_provider": true, "response_interceptor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions"}},
 	}
 }
 
@@ -115,6 +115,12 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 		return map[string]string{"identifier": "cursor"}, nil
 	case pluginabi.MethodModelStatic:
 		return pluginapi.ModelResponse{Provider: "cursor"}, nil
+	case pluginabi.MethodResponseInterceptAfter:
+		var req pluginapi.ResponseInterceptRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, errors.New("invalid model metadata response request")
+		}
+		return p.executor.InterceptResponse(p.ctx, req)
 	case pluginabi.MethodQuotaDescribe:
 		var req pluginapi.QuotaDescribeRequest
 		if err := json.Unmarshal(raw, &req); err != nil {

@@ -29,6 +29,8 @@ type Executor struct {
 	variantMu      sync.Mutex
 	variants       map[string]variantCacheEntry
 	variantFetches map[string]*variantFetch
+	modelMu        sync.Mutex
+	modelSnapshots map[string]modelSnapshot
 	// Log receives one diagnostic line per completed run; nil disables it.
 	// It carries timings and byte counts only, never credentials or bodies.
 	Log func(string)
@@ -85,6 +87,9 @@ func (e *Executor) Close() {
 	}
 	e.mu.Unlock()
 	e.wg.Wait()
+	e.modelMu.Lock()
+	clear(e.modelSnapshots)
+	e.modelMu.Unlock()
 }
 
 func executorToken(storage []byte, metadata map[string]any) (string, error) {

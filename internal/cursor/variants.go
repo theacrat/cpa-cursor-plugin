@@ -43,11 +43,12 @@ const defaultKind = "default"
 
 // variantGroup is one model family and its known upstream variant IDs.
 type variantGroup struct {
-	base    string
-	display string
-	ids     map[string]string
-	rank    map[string]int
-	hasBare bool
+	base        string
+	display     string
+	ids         map[string]string
+	rank        map[string]int
+	hasBare     bool
+	hasThinking bool
 }
 
 // variantTable maps family base IDs to their upstream variants.
@@ -127,6 +128,9 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		}
 		if bare {
 			group.hasBare = true
+		}
+		if row.ThinkingDetails != nil {
+			group.hasThinking = true
 		}
 	}
 	out := make([]*variantGroup, 0, len(order))
@@ -214,20 +218,14 @@ func resolveVariant(group *variantGroup, effort string) (string, error) {
 	}
 }
 
-// advertisedLevels lists the canonical levels a collapsed row serves. Only
-// rows with real variants advertise a switcher; bare singletons do not.
 func advertisedLevels(group *variantGroup) []string {
-	multi := false
-	for kind := range group.ids {
-		if kind != defaultKind {
-			multi = true
-			break
+	var levels []string
+	for _, level := range []string{levelMinimal, levelLow, levelMedium, levelHigh, levelXHigh, levelMax} {
+		if group.ids[level] != "" || level == levelHigh && group.ids["thinking"] != "" {
+			levels = append(levels, level)
 		}
 	}
-	if !multi {
-		return nil
-	}
-	return []string{levelMinimal, levelLow, levelMedium, levelHigh, levelXHigh, levelMax}
+	return levels
 }
 
 // splitModelSuffix divides a requested model into its base and parenthesised

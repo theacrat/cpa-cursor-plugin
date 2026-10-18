@@ -2,10 +2,15 @@ package cliproxy
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
+	"reflect"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	internalregistry "github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/openai"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
@@ -25,12 +30,43 @@ func TestCursorPrefixKeepsNativeProvidersSeparate(t *testing.T) {
 	registry.RegisterClient("review-codex", "codex", []*ModelInfo{{ID: "review-gpt", OwnedBy: "openai"}})
 	registry.RegisterClient("review-claude", "claude", []*ModelInfo{{ID: "review-claude", OwnedBy: "anthropic"}})
 	models := []*ModelInfo{{ID: "review-gpt", OwnedBy: "cursor"}, {ID: "review-claude", OwnedBy: "cursor"}}
+	if path := os.Getenv("CPA_MODEL_FIXTURE"); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var native []pluginapi.ModelInfo
+		if err := json.Unmarshal(raw, &native); err != nil || len(native) != 1 {
+			t.Fatal("invalid Cursor metadata fixture")
+		}
+		model := native[0]
+		models[0].ContextLength = int(model.ContextLength)
+		models[0].InputTokenLimit = int(model.InputTokenLimit)
+		models[0].SupportedInputModalities = model.SupportedInputModalities
+		models[0].SupportedOutputModalities = model.SupportedOutputModalities
+		models[0].SupportedParameters = model.SupportedParameters
+		models[0].Thinking = &internalregistry.ThinkingSupport{Levels: model.Thinking.Levels}
+	}
 	registry.RegisterClient("review-cursor", "cursor", applyModelPrefixes(models, fixture.Prefix, true))
 	for model, want := range map[string]string{"review-gpt": "codex", "review-claude": "claude", "cursor/review-gpt": "cursor", "cursor/review-claude": "cursor"} {
 		providers := registry.GetModelProviders(model)
 		if len(providers) != 1 || providers[0] != want {
 			t.Fatalf("model=%q providers=%v want=%q", model, providers, want)
 		}
+	}
+	info := registry.GetModelInfo("cursor/review-gpt", "cursor")
+	if info.ContextLength != 200000 || !reflect.DeepEqual(info.SupportedInputModalities, []string{"text", "image"}) || !reflect.DeepEqual(info.Thinking.Levels, []string{"low", "high"}) {
+		t.Fatalf("prefix registration lost metadata: %+v", info)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/v1/models", nil)
+	openai.NewOpenAIAPIHandler(&handlers.BaseAPIHandler{}).OpenAIModels(ctx)
+	if recorder.Code != 200 {
+		t.Fatalf("host model list status=%d", recorder.Code)
+	}
+	if err := os.WriteFile(os.Getenv("CPA_MODEL_LIST_FIXTURE"), recorder.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	registry.RegisterClient("review-cursor", "cursor", nil)
 	if providers := registry.GetModelProviders("cursor/review-gpt"); len(providers) != 0 {

@@ -18,6 +18,7 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor provider is disabled")
 	}
 	if !req.Host.ForceModelPrefix {
+		e.clearModelSnapshot(req)
 		if e.Log != nil {
 			e.Log("Cursor models withheld: set top-level force-model-prefix: true to prevent cross-provider routing")
 		}
@@ -71,7 +72,7 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 		// Every Cursor agent model answers in text through this executor.
 		// Name stays empty: CPA's prefixed copy keeps Name, so a bare-ID name
 		// would label cursor/<id> rows with the unprefixed ID in native lists.
-		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, SupportedOutputModalities: []string{"text"}})
+		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}})
 	}
 	// Warm the executor's switcher table: discovery already holds it.
 	e.variantMu.Lock()
@@ -96,22 +97,21 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if optionalErr == nil && optional.StatusCode >= 200 && optional.StatusCode < 300 && len(optional.Body) <= maxFrame {
 		if enrichment, err := availableModelInfo(optional.Body); err == nil {
 			for i := range models {
-				extra, ok := enrichment[defaultVariantID(tables[models[i].ID])]
-				if !ok {
-					continue
-				}
-				models[i].ContextLength = extra.ContextLength
-				models[i].InputTokenLimit = extra.InputTokenLimit
-				models[i].SupportedInputModalities = extra.SupportedInputModalities
+				applyAvailableMetadata(&models[i], tables[models[i].ID], enrichment)
 			}
 		}
 	}
 	for i := range models {
-		if levels := advertisedLevels(tables[models[i].ID]); len(levels) > 0 {
-			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: tables[models[i].ID].hasBare}
+		if levels := advertisedLevels(tables[models[i].ID]); len(levels) > 0 || tables[models[i].ID].hasThinking {
+			group := tables[models[i].ID]
+			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: group.hasBare && group.ids["thinking"] != "" && !group.hasThinking}
+			if len(levels) > 0 {
+				models[i].SupportedParameters = append(models[i].SupportedParameters, "reasoning_effort")
+			}
 		}
 	}
 	disambiguateDisplayNames(models)
+	e.storeModelSnapshot(req, models)
 	return pluginapi.ModelResponse{Provider: "cursor", Models: models}, nil
 }
 
@@ -159,50 +159,6 @@ func effortSuffix(id string) string {
 	}
 }
 
-func availableModelInfo(raw []byte) (map[string]pluginapi.ModelInfo, error) {
-	models := map[string]pluginapi.ModelInfo{}
-	err := eachWireField(raw, func(number protowire.Number, kind protowire.Type, value []byte) error {
-		if number != 2 || kind != protowire.BytesType {
-			return nil
-		}
-		var model pluginapi.ModelInfo
-		var images bool
-		err := eachWireField(value, func(number protowire.Number, kind protowire.Type, value []byte) error {
-			switch {
-			case number == 1 && kind == protowire.BytesType:
-				model.ID = string(value)
-			case number == 17 && kind == protowire.BytesType:
-				model.DisplayName = string(value)
-			case number == 10 && kind == protowire.VarintType:
-				v, n := protowire.ConsumeVarint(value)
-				if n < 0 {
-					return errors.New("invalid AvailableModels boolean")
-				}
-				images = v != 0
-			case number == 15 && kind == protowire.VarintType:
-				v, n := protowire.ConsumeVarint(value)
-				if n < 0 || v > 1<<32 {
-					return errors.New("invalid AvailableModels context limit")
-				}
-				model.ContextLength = int64(v)
-				model.InputTokenLimit = int64(v)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		model.SupportedInputModalities = []string{"text"}
-		if images {
-			model.SupportedInputModalities = append(model.SupportedInputModalities, "image")
-		}
-		if model.ID != "" {
-			models[model.ID] = model
-		}
-		return nil
-	})
-	return models, err
-}
 func eachWireField(raw []byte, visit func(protowire.Number, protowire.Type, []byte) error) error {
 	for len(raw) > 0 {
 		number, kind, n := protowire.ConsumeTag(raw)

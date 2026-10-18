@@ -72,3 +72,24 @@ func TestModelDispatchWithholdsUnsafeRouting(t *testing.T) {
 		t.Fatalf("unsafe routing returned %v", response)
 	}
 }
+
+func TestModelMetadataInterceptorDispatchAndDisabledNoop(t *testing.T) {
+	p := NewPlugin()
+	t.Cleanup(p.Shutdown)
+	if p.Registration()["capabilities"].(map[string]any)["response_interceptor"] != true {
+		t.Fatal("model metadata response interceptor not registered")
+	}
+	if _, err := p.dispatch("response.intercept_after", []byte(`{"Body":"e30="}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.dispatch("response.intercept_after", []byte(`{"Body":17}`)); err == nil {
+		t.Fatal("invalid model-list payload accepted")
+	}
+	if err := p.ApplyLifecycle([]byte(`{"config_yaml":"ZW5hYmxlZDogZmFsc2UK"}`)); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.dispatch("response.intercept_after", []byte(`{"Body":"e30="}`))
+	if err != nil || len(response.(pluginapi.ResponseInterceptResponse).Body) != 0 {
+		t.Fatalf("disabled interceptor did not pass through: %v", err)
+	}
+}

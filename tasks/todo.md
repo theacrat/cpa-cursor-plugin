@@ -1,10 +1,7 @@
-# provider reliability tasks
+# verified model metadata tasks
 
-- [x] block colliding model registration and document the required host policy.
-- [x] supply and verify dashboard api-key refresh scheduling.
-- [x] isolate and cancel per-account model lookups.
-- [x] enforce discovery control-plane deadlines.
-- [x] prevent tool identity alias collisions.
-- [x] preserve native enabled thinking through translation.
-- [x] update the go toolchain and verify advisories.
-- [x] complete full checks and review at the final source revision.
+- [x] verify upstream metadata fields and implement conservative family matching.
+- [x] expose real reasoning and executor tool capabilities.
+- [x] restore metadata on existing namespaced Cursor list rows.
+- [x] verify native dispatch and pinned-host model-list behaviour.
+- [x] complete review, full checks and documentation without deployment.

@@ -68,8 +68,8 @@ func TestGroupVariantsCollapse(t *testing.T) {
 	if opus.ids["low"] != "claude-opus-4-8-low" || opus.ids["high"] != "claude-opus-4-8-high" || opus.ids["thinking"] != "" {
 		t.Fatalf("opus kinds prefer standard tier: %#v", opus.ids)
 	}
-	if !opus.hasBare && len(advertisedLevels(opus)) != 6 {
-		t.Fatalf("effort group should advertise six levels: %#v", opus)
+	if !opus.hasBare && len(advertisedLevels(opus)) != 2 {
+		t.Fatalf("effort group should advertise discovered levels: %#v", opus)
 	}
 	sonnet := groups[1]
 	if sonnet.ids["default"] != "claude-4.5-sonnet" || sonnet.ids["thinking"] != "claude-4.5-sonnet-thinking" || !sonnet.hasBare {

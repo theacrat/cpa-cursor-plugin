@@ -65,9 +65,29 @@ parameter (or the client's native thinking field) selects the variant too;
 an explicit `(level)` suffix always wins. Requests without any effort signal
 use the bare variant when one exists, otherwise medium.
 
+Only discovered effort levels appear in metadata. A thinking toggle is exposed
+as `high`, which selects its discovered `-thinking` variant. Automatic fallback
+for an explicitly requested unsupported effort remains unchanged.
+
 Earlier versions registered one row per effort variant
 (`claude-opus-4-8-high`, …). Those IDs are gone; switch saved configs to the
 prefixed base ID with an optional `(level)` suffix.
+
+## Model metadata
+
+Cursor's authenticated catalogue supplies context limits, image support and agent
+tool support when reported. Exact upstream IDs take precedence over aliases, and
+shared family limits use the smallest verified value across selectable variants.
+Unknown limits, including output-token limits not reported by Cursor, remain absent.
+No limits are guessed from model names or copied from a vendor's direct API.
+
+Model lists expose verified metadata on existing namespaced Cursor rows, including
+input/output modalities, client-tool support and available reasoning controls.
+This restores fields CPA's normal OpenAI model list omits without adding models,
+changing route IDs or modifying other providers. Explicit list metadata is preserved.
+List requests use cached discovery data and never make upstream requests.
+
+See [metadata sources and boundaries](docs/model-metadata.md).
 
 ## Quota
 
