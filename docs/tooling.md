@@ -9,8 +9,8 @@ mise run hooks
 mise run check
 ```
 
-The toolchain pins match the sibling model-context plugin: Go 1.27.1 and Zig
-0.17.0. A native C compiler and Python 3 are also required. `make` delegates to
+The toolchain pins are Go 1.27.2 and Zig 0.17.0. A native C compiler and Python 3
+are also required. `make` delegates to
 mise, so `make check` and `mise run check` run the same checks.
 
 `check` runs Go formatting checks, shell/Python syntax checks, `go vet`, tests with
@@ -26,6 +26,7 @@ mise run build-linux-arm64
 mise run build-darwin-amd64
 mise run build-darwin-arm64
 mise run test-abi
+mise run test-host
 ```
 
 Build outputs go to `dist/<os>-<arch>/cpa-cursor.so` on Linux and
@@ -41,3 +42,8 @@ is uploaded separately for each native platform.
 
 See [the native ABI smoke notes](../tests/abi/README.md) for the network-free test
 contract and how to smoke-test an existing shared library.
+
+`test-host` verifies the pinned CPA implementation using disposable source copies
+under `.scratch`, including provider registry separation, API-key refresh scheduling
+and native thinking translation. It does not modify the dependency cache or use
+live credentials.

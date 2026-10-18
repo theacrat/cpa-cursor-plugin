@@ -26,8 +26,9 @@ type Executor struct {
 	client *http.Client
 	// variants caches the effort-variant table per credential for the
 	// thinking switcher. It is filled by discovery and lazily by execution.
-	variantMu sync.Mutex
-	variants  map[string]variantCacheEntry
+	variantMu      sync.Mutex
+	variants       map[string]variantCacheEntry
+	variantFetches map[string]*variantFetch
 	// Log receives one diagnostic line per completed run; nil disables it.
 	// It carries timings and byte counts only, never credentials or bodies.
 	Log func(string)

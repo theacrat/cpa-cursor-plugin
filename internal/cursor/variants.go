@@ -60,6 +60,13 @@ type variantCacheEntry struct {
 	expires time.Time
 }
 
+type variantFetch struct {
+	done  chan struct{}
+	table *variantTable
+	took  time.Duration
+	err   error
+}
+
 // analyseVariant folds a discovered model ID into its family base, effort
 // kind and selection rank. Trailing family tokens are stripped inside out;
 // the rightmost effort token sets the kind and the standard (non-fast) tier
@@ -303,7 +310,10 @@ func originalSelection(sourceFormat string, original []byte) (string, bool) {
 		return obj
 	}
 	switch {
-	case strings.Contains(format, "anthropic") || strings.Contains(format, "claude"):
+	case strings.Contains(format, "anthropic") || strings.Contains(format, "claude") || objField(body, "thinking") != nil || objField(body, "output_config") != nil:
+		if effort, ok := normaliseSelection(strField(objField(body, "output_config"), "effort")); ok {
+			return effort, true
+		}
 		if effort, ok := normaliseSelection(strField(body, "effort")); ok {
 			return effort, true
 		}
@@ -325,14 +335,31 @@ func originalSelection(sourceFormat string, original []byte) (string, bool) {
 	}
 }
 
-// requestEffort resolves the desired effort for one execution. An explicit
-// model(level) suffix wins, then the translated payload, then the native
-// client field, then the default. "" means the default variant.
+func translatedEnabledThinking(req pluginapi.ExecutorRequest) bool {
+	var payload struct {
+		Effort string `json:"reasoning_effort"`
+	}
+	var original struct {
+		Effort   string `json:"reasoning_effort"`
+		Thinking struct {
+			Budget *int `json:"budget_tokens"`
+		} `json:"thinking"`
+	}
+	if json.Unmarshal(req.Payload, &payload) != nil || json.Unmarshal(req.OriginalRequest, &original) != nil {
+		return false
+	}
+	effort, selected := originalSelection(req.SourceFormat, req.OriginalRequest)
+	return strings.EqualFold(strings.TrimSpace(payload.Effort), "auto") && original.Effort == "" && selected && effort == "thinking" && original.Thinking.Budget == nil
+}
+
 func requestEffort(req pluginapi.ExecutorRequest) string {
 	if _, suffix := splitModelSuffix(req.Model); suffix != "" {
 		if effort, ok := suffixSelection(suffix); ok {
 			return effort
 		}
+	}
+	if translatedEnabledThinking(req) {
+		return "thinking"
 	}
 	if effort, ok := payloadSelection(req.Payload); ok {
 		return effort
@@ -354,33 +381,71 @@ func variantCacheKey(token string) string {
 // fetching it over host HTTP on a miss. A failed fetch is an error: the
 // executor must not guess upstream variant IDs.
 func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRequest) (*variantTable, time.Duration, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
 	token, err := executorToken(req.StorageJSON, req.AuthMetadata)
 	if err != nil {
 		return nil, 0, err
 	}
 	key := variantCacheKey(token)
 	e.variantMu.Lock()
-	defer e.variantMu.Unlock()
 	if entry, ok := e.variants[key]; ok && time.Now().Before(entry.expires) {
+		e.variantMu.Unlock()
 		return entry.table, 0, nil
 	}
+	if pending, ok := e.variantFetches[key]; ok {
+		e.variantMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-pending.done:
+			if err := ctx.Err(); err != nil {
+				return nil, 0, err
+			}
+			return pending.table, pending.took, pending.err
+		}
+	}
+	if e.variantFetches == nil {
+		e.variantFetches = make(map[string]*variantFetch)
+	}
+	pending := &variantFetch{done: make(chan struct{})}
+	e.variantFetches[key] = pending
+	e.variantMu.Unlock()
 	fetchStart := time.Now()
 	rows, err := e.fetchVariantRows(ctx, req)
 	fetchTook := time.Since(fetchStart)
-	if err != nil {
-		return nil, fetchTook, err
+	var table *variantTable
+	if err == nil {
+		table = &variantTable{byBase: map[string]*variantGroup{}}
+		for _, group := range groupVariants(rows) {
+			if _, dup := table.byBase[group.base]; !dup {
+				table.byBase[group.base] = group
+			}
+		}
 	}
-	table := &variantTable{byBase: map[string]*variantGroup{}}
-	for _, group := range groupVariants(rows) {
-		if _, dup := table.byBase[group.base]; !dup {
-			table.byBase[group.base] = group
+	e.variantMu.Lock()
+	if err == nil {
+		e.cacheVariantsLocked(key, table)
+	}
+	pending.table, pending.took, pending.err = table, fetchTook, err
+	delete(e.variantFetches, key)
+	close(pending.done)
+	e.variantMu.Unlock()
+	return table, fetchTook, err
+}
+
+func (e *Executor) cacheVariantsLocked(key string, table *variantTable) {
+	now := time.Now()
+	for key, entry := range e.variants {
+		if !now.Before(entry.expires) {
+			delete(e.variants, key)
 		}
 	}
 	if e.variants == nil {
-		e.variants = map[string]variantCacheEntry{}
+		e.variants = make(map[string]variantCacheEntry)
 	}
-	e.variants[key] = variantCacheEntry{table: table, expires: time.Now().Add(variantCacheTTL)}
-	return table, fetchTook, nil
+	e.variants[key] = variantCacheEntry{table: table, expires: now.Add(variantCacheTTL)}
 }
 
 // fetchVariantRows runs authenticated model discovery for the executor's own
@@ -410,6 +475,9 @@ func (e *Executor) fetchVariantRows(ctx context.Context, req pluginapi.ExecutorR
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	response, err := req.HTTPClient.Do(ctx, pluginapi.HTTPRequest{Method: http.MethodPost, URL: target, Headers: headers, Body: body})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, errors.New("Cursor model discovery failed")
 	}

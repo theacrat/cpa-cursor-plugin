@@ -343,7 +343,21 @@ func authData(m map[string]any, now time.Time) (pluginapi.AuthData, error) {
 	}
 	a.Attributes["auth_kind"] = "oauth"
 	a.Metadata["auth_kind"] = "oauth"
+	applyCredentialState(&a, m)
 	return a, nil
+}
+
+func applyCredentialState(a *pluginapi.AuthData, storage map[string]any) {
+	for _, key := range []string{"access_token", "refresh_token", "api_key", "expires_at"} {
+		if value, ok := storage[key]; ok {
+			a.Metadata[key] = value
+		} else {
+			delete(a.Metadata, key)
+		}
+	}
+	if strings.TrimSpace(stringField(storage, "api_key")) != "" {
+		a.Attributes["refresh_interval_seconds"] = "300"
+	}
 }
 
 func (s *AuthService) ParseAuth(ctx context.Context, req pluginapi.AuthParseRequest) (pluginapi.AuthParseResponse, error) {
@@ -552,6 +566,7 @@ func (s *AuthService) RefreshAuth(ctx context.Context, req pluginapi.AuthRefresh
 	for k, v := range req.Attributes {
 		a.Attributes[k] = v
 	}
+	applyCredentialState(&a, m)
 	if err := lifecycleError(ctx); err != nil {
 		return pluginapi.AuthRefreshResponse{}, err
 	}

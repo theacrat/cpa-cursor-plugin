@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 func TestPluginLifecycle(t *testing.T) {
@@ -54,5 +56,19 @@ func TestMalformedRequestRejected(t *testing.T) {
 	}
 	if _, err := p.dispatch("executor.http_request", []byte(`{}`)); err == nil {
 		t.Fatal("arbitrary forwarding accepted")
+	}
+}
+
+func TestModelDispatchWithholdsUnsafeRouting(t *testing.T) {
+	p := NewPlugin()
+	t.Cleanup(p.Shutdown)
+	p.executor.Log = nil
+	response, err := p.dispatch("model.for_auth", []byte(`{"Host":{"ForceModelPrefix":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, ok := response.(pluginapi.ModelResponse)
+	if !ok || models.Provider != "cursor" || len(models.Models) != 0 {
+		t.Fatalf("unsafe routing returned %v", response)
 	}
 }

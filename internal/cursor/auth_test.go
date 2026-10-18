@@ -269,6 +269,43 @@ func TestBrowserRefreshRequiresReauthentication(t *testing.T) {
 	}
 }
 
+func TestAPIKeyAuthExposesRefreshPolicyAndCurrentTokenMetadata(t *testing.T) {
+	s, now := fixtureService(t)
+	oldToken := fixtureJWT("account", now.Add(time.Hour))
+	newToken := fixtureJWT("account", now.Add(2*time.Hour))
+	raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": oldToken, "api_key": "dashboard-secret"})
+	parsed, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Auth.Attributes["refresh_interval_seconds"] != "300" || parsed.Auth.Metadata["access_token"] != oldToken || parsed.Auth.Metadata["expires_at"] != now.Add(time.Hour).UTC().Format(time.RFC3339) {
+		t.Fatal("API-key auth omitted host refresh policy or token state")
+	}
+	client := fakeHTTP{do: func(context.Context, pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		body, _ := json.Marshal(map[string]string{"accessToken": newToken})
+		return pluginapi.HTTPResponse{StatusCode: 200, Body: body}, nil
+	}}
+	refreshed, err := s.RefreshAuth(context.Background(), pluginapi.AuthRefreshRequest{StorageJSON: parsed.Auth.StorageJSON, Metadata: map[string]any{"access_token": oldToken, "expires_at": "stale", "note": "kept"}, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Auth.Metadata["access_token"] != newToken || refreshed.Auth.Metadata["expires_at"] != now.Add(2*time.Hour).UTC().Format(time.RFC3339) || refreshed.Auth.Metadata["note"] != "kept" || refreshed.Auth.Attributes["refresh_interval_seconds"] != "300" {
+		t.Fatal("refresh restored stale host metadata or lost its policy")
+	}
+}
+
+func TestBrowserAuthDoesNotScheduleAPIKeyExchange(t *testing.T) {
+	s, now := fixtureService(t)
+	raw, _ := json.Marshal(map[string]any{"type": "cursor", "access_token": fixtureJWT("account", now.Add(time.Hour)), "refresh_token": "browser-token"})
+	parsed, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Auth.Attributes["refresh_interval_seconds"] != "" {
+		t.Fatal("browser auth received an API-key refresh schedule")
+	}
+}
+
 func TestLoginPollFailuresAreRedacted(t *testing.T) {
 	for _, body := range []string{`secret`, `{}`, `{"accessToken":"secret","refreshToken":17}`, `{"accessToken":"secret","refreshToken":"r","selectedTeamId":-1}`} {
 		t.Run(body, func(t *testing.T) {

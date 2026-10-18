@@ -17,8 +17,9 @@ idempotent shutdown. The Python driver validates the JSON responses and enforces
 30-second timeout. The Go runtime remains loaded until process exit rather than
 calling `dlclose`.
 
-Host callbacks simulate quota HTTP operations and reject every other upstream
-request. The fixture re-enables the provider only for its synthetic quota fetch;
+Host callbacks simulate quota HTTP operations, accept diagnostic log calls and
+reject every other upstream request. The fixture verifies an empty model catalogue
+when prefix-only routing is off. It re-enables the provider for its synthetic quota fetch;
 no login, auth refresh or real upstream requests run.
 Compiler warnings remain errors, except unused static helpers copied by cgo into
 the generated header (suppressed only around that include).

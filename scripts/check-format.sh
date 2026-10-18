@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
-unformatted=$(gofmt -l .)
+unformatted=$(gofmt -l . tests/host/*.go.txt)
 if [[ -n "$unformatted" ]]; then
   printf 'Run mise run fmt to format:\n%s\n' "$unformatted" >&2
   exit 1

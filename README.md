@@ -13,6 +13,8 @@ CLIProxyAPI v7.3.20 or newer is required for cancellable host HTTP operations. C
 Build the library and copy `cpa-cursor.so` (Linux) or `cpa-cursor.dylib` (macOS) into CPA's configured plugin directory. The basename is the configuration key; the auth provider identifier is `cursor`.
 
 ```yaml
+force-model-prefix: true
+
 plugins:
   enabled: true
   dir: plugins
@@ -46,8 +48,10 @@ file to override it per account. The configured default is applied when a
 credential is loaded or logged in, not written to its file; refreshes keep the
 host's current prefix.
 
-With CPA's `force-model-prefix: true`, only the prefixed IDs are registered.
-Without it CPA registers both, so the bare IDs can still collide.
+CPA's top-level `force-model-prefix: true` is required. Without it the plugin
+withholds its model catalogue rather than registering colliding bare IDs, allowing
+CPA to remove stale registrations too. This host setting also requires explicit
+prefixes for other accounts that have one.
 
 This is a breaking change: saved configs must switch to `cursor/<id>`.
 
@@ -78,6 +82,10 @@ The native management endpoint is `GET /v0/management/cursor-auth-url`. Use your
 Cursor uses a custom PKCE-style browser flow, not RFC 8628 device authorisation. The verifier stays inside the plugin; it is sent only to Cursor's poll endpoint. Do not publish credential files or upstream request logs containing login query parameters.
 
 The official CLI does not implement browser refresh-token exchange. Expired browser credentials require another login. Dashboard API keys can be exchanged for fresh access tokens; this is a different operation from rotating browser refresh tokens.
+
+Dashboard API-key credentials supply CPA's refresh policy and current token expiry,
+so automatic re-exchange starts five minutes before expiry. Browser-only credentials
+do not receive that refresh policy.
 
 Existing credentials can also be imported through CPA's auth-file interface:
 

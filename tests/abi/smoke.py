@@ -18,7 +18,7 @@ def main() -> None:
     assert [record["method"] for record in records] == [
         "plugin.register", "auth.identifier", "quota.identifier", "quota.describe",
         "plugin.quiesce", "plugin.reconfigure", "quota.fetch", "plugin.reconfigure",
-        "quota.fetch", "quota.reset", "plugin.shutdown",
+        "model.for_auth", "quota.fetch", "quota.reset", "plugin.shutdown",
     ], records
     assert all(record["code"] == 0 for record in records), records
     disabled_fetch = records[6]["response"]
@@ -30,6 +30,9 @@ def main() -> None:
         assert "result" in envelope and "error" not in envelope, envelope
     assert responses["auth.identifier"]["result"]["identifier"] == "cursor"
     assert responses["quota.identifier"]["result"]["identifier"] == "cursor"
+    model_catalogue = responses["model.for_auth"]["result"]
+    assert model_catalogue["Provider"] == "cursor", model_catalogue
+    assert not model_catalogue.get("Models"), model_catalogue
     quota_description = responses["quota.describe"]["result"]
     assert quota_description["supported_providers"] == ["cursor"], quota_description
     assert not quota_description.get("supports_reset", False), quota_description

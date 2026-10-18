@@ -572,7 +572,7 @@ func wireFields(t *testing.T, raw []byte) map[protowire.Number][]byte {
 }
 
 func TestModelsUseHostAndOfficialPath(t *testing.T) {
-	req := pluginapi.AuthModelRequest{StorageJSON: testRequest().StorageJSON, HTTPClient: fixtureHost{do: func(ctx context.Context, r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+	req := pluginapi.AuthModelRequest{Host: pluginapi.HostConfigSummary{ForceModelPrefix: true}, StorageJSON: testRequest().StorageJSON, HTTPClient: fixtureHost{do: func(ctx context.Context, r pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
 		if strings.HasSuffix(r.URL, "/aiserver.v1.AiService/AvailableModels") {
 			fields := wireFields(t, r.Body)
 			if fields[5][0] != 1 || fields[7][0] != 1 || string(fields[4]) != "model" {

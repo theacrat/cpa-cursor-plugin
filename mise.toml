@@ -1,10 +1,10 @@
 [tools]
-go = "1.27.1"
+go = "1.27.2"
 zig = "0.17.0"
 
 [tasks.fmt]
 description = "Format all Go source"
-run = "gofmt -w ."
+run = "gofmt -w . tests/host/*.go.txt"
 
 [tasks.fmt-check]
 description = "Check Go formatting without changing files"
@@ -29,6 +29,10 @@ run = "CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./..."
 [tasks.test-abi]
 description = "Build and smoke-test the native C ABI without network requests"
 run = "bash scripts/abi-smoke.sh"
+
+[tasks.test-host]
+description = "Verify provider routing, refresh scheduling and reasoning against the pinned host"
+run = "python3 -I scripts/check-host.py"
 
 [tasks.check]
 description = "Check formatting, helper syntax, static analysis and all test modes"

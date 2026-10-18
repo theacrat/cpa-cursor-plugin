@@ -1,0 +1,46 @@
+package cursor
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+)
+
+func TestExportHostFixture(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	s := NewAuthService(DefaultConfig())
+	defer s.Close()
+	s.now = func() time.Time { return now }
+	raw, _ := json.Marshal(map[string]string{"type": "cursor", "access_token": fixtureJWT("host-fixture", now.Add(10*time.Minute)), "api_key": "fixture-key"})
+	parsed, err := s.ParseAuth(context.Background(), pluginapi.AuthParseRequest{RawJSON: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(parsed.Auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("CPA_HOST_FIXTURE"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var req pluginapi.ExecutorRequest
+	if err := json.Unmarshal(mustReadHostFixture(t, os.Getenv("CPA_THINKING_FIXTURE")), &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestEffort(req); got != "thinking" {
+		t.Fatalf("translated native thinking resolved to %q", got)
+	}
+}
+
+func mustReadHostFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}

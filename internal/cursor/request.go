@@ -191,34 +191,27 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 		seen[t.Function.Name] = true
 		names = append(names, t.Function.Name)
 	}
-	// Keep raw names and advertised names disjoint, including prefixed client names.
-	for _, name := range names {
-		if !strings.HasPrefix(name, "mcp_"+toolProvider+"_") {
-			b.wire[name] = name
-			b.resolve[name] = name
+	for _, prefixed := range []bool{false, true} {
+		for _, name := range names {
+			if strings.HasPrefix(name, "mcp_"+toolProvider+"_") != prefixed {
+				continue
+			}
+			base := name
+			for strings.HasPrefix(base, "mcp_"+toolProvider+"_") {
+				base = strings.TrimPrefix(base, "mcp_"+toolProvider+"_")
+			}
+			if base == "" {
+				base = "tool"
+			}
+			wire := base
+			for i := 2; b.resolve[wire] != "" || b.resolve["mcp_"+toolProvider+"_"+wire] != "" || b.resolve[toolProvider+"-"+wire] != ""; i++ {
+				wire = fmt.Sprintf("%s_%d", base, i)
+			}
+			b.wire[name] = wire
+			b.resolve[wire] = name
+			b.resolve["mcp_"+toolProvider+"_"+wire] = name
+			b.resolve[toolProvider+"-"+wire] = name
 		}
-	}
-	for _, name := range names {
-		if _, ok := b.wire[name]; ok {
-			continue
-		}
-		base := name
-		for strings.HasPrefix(base, "mcp_"+toolProvider+"_") {
-			base = strings.TrimPrefix(base, "mcp_"+toolProvider+"_")
-		}
-		if base == "" {
-			base = "tool"
-		}
-		wire := base
-		for i := 2; b.resolve[wire] != ""; i++ {
-			wire = fmt.Sprintf("%s_%d", base, i)
-		}
-		b.wire[name] = wire
-		b.resolve[wire] = name
-	}
-	for _, name := range names {
-		b.resolve["mcp_"+toolProvider+"_"+b.wire[name]] = name
-		b.resolve[toolProvider+"-"+b.wire[name]] = name
 	}
 	if string(chat.ToolChoice) != "\"none\"" {
 		for _, t := range chat.Tools {

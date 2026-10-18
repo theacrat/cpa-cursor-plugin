@@ -30,6 +30,9 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   native field of the original request by source format (OpenAI
   `reasoning_effort`, Anthropic `effort`/`thinking`, Gemini `thinkingLevel`,
   Codex `reasoning.effort`), then the base default.
+  Native thinking fields are recognised even when the host reports the translated
+  input format. Implicit translated `auto` preserves an original enabled thinking
+  request without a budget, while explicit suffixes and client defaults still win.
 - Level mapping: exact suffix wins, then the `thinking` variant, then the
   default. `xhigh` prefers a real `xhigh` variant, then `max`. `none`,
   `auto` and numeric budgets select the default. Unknown values never fail

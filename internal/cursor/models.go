@@ -17,6 +17,12 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	if !e.cfg.Enabled {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor provider is disabled")
 	}
+	if !req.Host.ForceModelPrefix {
+		if e.Log != nil {
+			e.Log("Cursor models withheld: set top-level force-model-prefix: true to prevent cross-provider routing")
+		}
+		return pluginapi.ModelResponse{Provider: "cursor"}, nil
+	}
 	if req.HTTPClient == nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, errors.New("Cursor model discovery requires the host HTTP client")
 	}
@@ -25,6 +31,8 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 		return pluginapi.ModelResponse{Provider: "cursor"}, err
 	}
 	defer release()
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.cfg.RequestTimeout)*time.Second)
+	defer cancel()
 	base := e.cfg.APIBaseURL
 	target, err := endpoint(base, "/aiserver.v1.AiService/GetUsableModels")
 	if err != nil {
@@ -67,11 +75,8 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	}
 	// Warm the executor's switcher table: discovery already holds it.
 	e.variantMu.Lock()
-	if e.variants == nil {
-		e.variants = map[string]variantCacheEntry{}
-	}
 	if token, err := executorToken(req.StorageJSON, req.Metadata); err == nil {
-		e.variants[variantCacheKey(token)] = variantCacheEntry{table: &variantTable{byBase: tables}, expires: time.Now().Add(variantCacheTTL)}
+		e.cacheVariantsLocked(variantCacheKey(token), &variantTable{byBase: tables})
 	}
 	e.variantMu.Unlock()
 	// The official CLI enriches its usable catalogue with AvailableModels.

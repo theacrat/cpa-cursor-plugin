@@ -219,6 +219,32 @@ func TestOriginalEffortFormats(t *testing.T) {
 	}
 }
 
+func TestTranslatedThinkingPreservesNativeIntentAndExplicitDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, payload, original, want string
+	}{
+		{"enabled without budget", "model", `{"reasoning_effort":"auto"}`, `{"thinking":{"type":"enabled"}}`, "thinking"},
+		{"enabled missing translated effort", "model", `{}`, `{"thinking":{"type":"enabled"}}`, "thinking"},
+		{"native auto wins", "model", `{"reasoning_effort":"auto"}`, `{"reasoning_effort":"auto","thinking":{"type":"enabled"}}`, ""},
+		{"native effort default wins", "model", `{"reasoning_effort":"auto"}`, `{"effort":"auto","thinking":{"type":"enabled"}}`, ""},
+		{"native output default wins", "model", `{"reasoning_effort":"auto"}`, `{"output_config":{"effort":"none"},"thinking":{"type":"enabled"}}`, ""},
+		{"suffix none wins", "model(none)", `{"reasoning_effort":"auto"}`, `{"thinking":{"type":"enabled"}}`, ""},
+		{"suffix high wins", "model(high)", `{"reasoning_effort":"auto"}`, `{"thinking":{"type":"enabled"}}`, "high"},
+		{"payload none wins", "model", `{"reasoning_effort":"none"}`, `{"thinking":{"type":"enabled"}}`, ""},
+		{"translated budget wins", "model", `{"reasoning_effort":"low"}`, `{"thinking":{"type":"enabled","budget_tokens":1024}}`, "low"},
+		{"native output effort", "model", `{}`, `{"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`, "max"},
+		{"disabled stays default", "model", `{"reasoning_effort":"none"}`, `{"thinking":{"type":"disabled"}}`, ""},
+		{"plain auto stays default", "model", `{"reasoning_effort":"auto"}`, `{"reasoning_effort":"auto"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := pluginapi.ExecutorRequest{Model: tc.model, SourceFormat: "chat-completions", Payload: []byte(tc.payload), OriginalRequest: []byte(tc.original)}
+			if got := requestEffort(req); got != tc.want {
+				t.Fatalf("effort=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStreamResolvesVariantBeforeBuild(t *testing.T) {
 	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		initial := readClient(t, r.Body).GetRunRequest()

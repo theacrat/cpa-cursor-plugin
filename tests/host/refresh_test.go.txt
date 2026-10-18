@@ -1,0 +1,34 @@
+package auth
+
+import (
+	"encoding/json"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+)
+
+func TestCursorPluginRefreshPolicy(t *testing.T) {
+	raw, err := os.ReadFile(os.Getenv("CPA_HOST_FIXTURE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture pluginapi.AuthData
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	a := &Auth{ID: fixture.ID, Provider: fixture.Provider, Metadata: fixture.Metadata, Attributes: fixture.Attributes, NextRefreshAfter: fixture.NextRefreshAfter}
+	m := NewManager(nil, nil, nil)
+	before := a.NextRefreshAfter.Add(-time.Second)
+	if m.shouldRefresh(a, before) {
+		t.Fatal("credential refreshed before its deadline")
+	}
+	now := a.NextRefreshAfter.Add(time.Second)
+	if !m.shouldRefresh(a, now) {
+		t.Fatal("credential did not refresh after its deadline")
+	}
+	if due, ok := nextRefreshCheckAt(now, a, time.Millisecond); !ok || due.After(now) {
+		t.Fatalf("credential left refresh schedule: due=%v scheduled=%v", due, ok)
+	}
+}
