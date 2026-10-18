@@ -69,19 +69,13 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 			continue
 		}
 		tables[group.base] = group
-		// Every Cursor agent model answers in text through this executor.
-		// Name stays empty: CPA's prefixed copy keeps Name, so a bare-ID name
-		// would label cursor/<id> rows with the unprefixed ID in native lists.
 		models = append(models, pluginapi.ModelInfo{ID: group.base, Object: "model", OwnedBy: "cursor", Type: "chat", DisplayName: group.display, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}})
 	}
-	// Warm the executor's switcher table: discovery already holds it.
 	e.variantMu.Lock()
 	if token, err := executorToken(req.StorageJSON, req.Metadata); err == nil {
 		e.cacheVariantsLocked(variantCacheKey(token), &variantTable{byBase: tables})
 	}
 	e.variantMu.Unlock()
-	// The official CLI enriches its usable catalogue with AvailableModels.
-	// Discovery still succeeds when this optional endpoint is unavailable.
 	availableURL, err := endpoint(base, "/aiserver.v1.AiService/AvailableModels")
 	if err != nil {
 		return pluginapi.ModelResponse{Provider: "cursor"}, err
@@ -110,20 +104,24 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 			}
 		}
 	}
-	disambiguateDisplayNames(models)
 	e.storeModelSnapshot(req, models)
+	disambiguateDisplayNames(models)
 	return pluginapi.ModelResponse{Provider: "cursor", Models: models}, nil
 }
 
-// Cursor publishes one row per reasoning-effort variant (for example
-// claude-opus-4-8-low and claude-opus-4-8-high) sharing a single display
-// name. Rows stay selectable by ID, but identical names are unusable in a
-// model picker, so duplicated names gain their effort suffix. Unrecognised
-// duplicates fall back to the full ID rather than guessing.
 func disambiguateDisplayNames(models []pluginapi.ModelInfo) {
 	counts := map[string]int{}
 	for _, m := range models {
 		counts[m.DisplayName]++
+	}
+	for index := range models {
+		if counts[models[index].DisplayName] > 1 && strings.HasSuffix(models[index].ID, "-fast") {
+			models[index].DisplayName += " (Fast)"
+		}
+	}
+	clear(counts)
+	for _, model := range models {
+		counts[model.DisplayName]++
 	}
 	seen := map[string]int{}
 	for i := range models {

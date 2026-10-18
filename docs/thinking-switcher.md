@@ -59,10 +59,11 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   by the host as unknown models before reaching the plugin.
 - Every published row declares `text` output modality: Cursor agent models
   only answer in text through this executor.
-- Display names remove trailing effort controls while preserving annotations such
-  as `(NO ZDR)`. Names carry `(Cursor)` and fast rows also carry `(Fast)`, so a
-  provider difference cannot be mistaken for a speed tier. Custom names remain
-  untouched unless they match the same normalised family label.
+- Display names remove recognised effort, context-size, provider and NO ZDR
+  annotations. Unique visible names have no added qualifiers. Duplicate names gain
+  `(Fast)`, then `(Cursor)`, then a route ID only as needed. Filtering a duplicate
+  out of the returned catalogue removes the unnecessary qualifier. Custom names
+  and structured metadata remain unchanged.
 
 ## Acceptance
 

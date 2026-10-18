@@ -73,7 +73,7 @@ func TestRestoreHostModelListMetadata(t *testing.T) {
 	for _, row := range root.Data {
 		if row["id"] == "cursor/review-gpt-fast" {
 			foundFast = true
-			if row["display_name"] != "Review GPT (Fast) (Cursor)" || row["context_length"] != float64(100000) {
+			if row["display_name"] != "Review GPT (Fast)" || row["context_length"] != float64(100000) {
 				t.Fatalf("host list lost fast label or metadata: %v", row)
 			}
 			continue

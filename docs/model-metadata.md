@@ -81,9 +81,11 @@ Snapshots are replaced on successful discovery, discarded on reload/shutdown and
 never persisted with credentials.
 
 Standard and fast tiers keep separate snapshots and exact upstream variant maps.
-Recognised trailing effort labels are removed from picker names and provider/speed
-markers are explicit. An existing effort-labelled name is corrected only when its
-normalised label matches the same discovered family, preserving custom names.
+Recognised effort, context-size, provider and NO ZDR decorations are removed from
+picker names. Provider, speed and route-ID qualifiers are added only as needed for
+visible duplicate names, never to unique labels. An existing decorated name is
+corrected only when its normalised label matches the same discovered family,
+preserving custom names. These changes affect labels, not structured metadata.
 
 ## verification record
 
@@ -100,3 +102,9 @@ reached 86.4% statement coverage in the metadata verification run.
 host registry prefixing and actual OpenAI model-list handler, then restores the
 stripped fields through the plugin interceptor. Live account behaviour and visual
 picker rendering are not claimed, and nothing was deployed by this change.
+
+The minimal-label follow-up passes catalogue fixtures for unique names, speed and
+provider collisions, custom labels, explicit nulls, repeated IDs, Codex lists and
+qualifiers disappearing when a duplicate is filtered out. The collision-guard
+mutation is caught by the focused regression suite. Full repository and pinned-host
+checks pass, with Cursor package coverage at 87.0%. Deployment remains on hold.

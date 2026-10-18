@@ -1,27 +1,26 @@
-# model labels and fast tiers
+# minimal model labels
 
-Fix misleading effort-labelled model names across every Cursor model family,
-expose discovered fast tiers separately and deploy to `root@192.168.1.1`.
+Use only the model name when it is unique and add the minimum needed to distinguish
+duplicate names. All deployments are on hold.
 
 ## decisions
 
-Keep existing standard route IDs, suffix fast routes with `-fast`, and keep low/high
-in each route's reasoning selector. Clean only recognised trailing effort/speed
-labels while retaining model identity and annotations. Add `(Cursor)` to provider
-labels, preserve custom names and leave other providers untouched.
+Remove recognised effort, context-size, provider and NO ZDR annotations from base
+labels. Inspect the returned catalogue before adding Fast, Cursor or route-ID
+qualifiers, only while duplicates remain. Keep custom names, routing, model IDs and
+structured metadata intact. Do not modify another provider's rows.
 
 ## slices
 
 | slice | acceptance | verification |
 | --- | --- | --- |
-| grouping | standard and fast tiers keep distinct upstream IDs and effort tables | variant and metadata tests |
-| labels | all families have neutral effort-independent names and explicit provider/speed labels | fixture table and model-list tests |
-| deployment | arm64 library loads, live labels are clean and provider routes stay separate | native ABI fixture and authenticated catalogue checks |
+| base labels | unique names contain no recognised metadata decorations | family-label fixtures |
+| duplicate names | only visible collisions get the minimum qualifiers, removed when the duplicate disappears | OpenAI and Codex catalogue fixtures |
+| host contract | metadata and provider isolation survive host serialisation | pinned-host fixture |
 
 ## final gate
 
 Review the complete diff, then run `mise run check` and `mise run test-host` without
 concurrent source edits.
 
-No repository publication is required. Deploy the verified arm64 build without
-configuration changes or retained backups, then remove temporary remote files.
+Do not connect to the deployment host, upload artefacts or restart services.

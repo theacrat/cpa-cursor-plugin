@@ -1,7 +1,7 @@
-# model label and fast-tier tasks
+# minimal model label tasks
 
-- [x] separate speed tiers and preserve exact effort routing.
-- [x] clean labels across all model families and preserve custom names.
-- [x] verify metadata, host lists and native ABI behaviour.
-- [x] review, build arm64 and deploy without retained backups.
-- [x] verify the live catalogue and remove temporary files.
+- [x] strip recognised display-only annotations without changing metadata.
+- [x] qualify only visible duplicate names and preserve custom names.
+- [x] verify OpenAI and Codex catalogue behaviour, including idempotence.
+- [x] complete review, full checks and pinned-host verification.
+- [x] save changes locally without deploying.

@@ -13,20 +13,22 @@ import (
 
 func TestModelLabelsAreNeutralAcrossFamilies(t *testing.T) {
 	for _, tc := range []struct{ id, label, want string }{
-		{"claude-fable-5-1-low", "Claude Fable 5.1 1M Low (NO ZDR)", "Claude Fable 5.1 1M (NO ZDR) (Cursor)"},
-		{"claude-opus-5-thinking-high", "Claude Opus 5 1M Thinking", "Claude Opus 5 1M (Cursor)"},
-		{"gemini-3.6-flash-minimal", "Gemini 3.6 Flash Minimal", "Gemini 3.6 Flash (Cursor)"},
-		{"gpt-5.6-luna-high", "GPT-5.6 Luna 1M High", "GPT-5.6 Luna 1M (Cursor)"},
-		{"gpt-5.5-extra-high", "GPT-5.5 1M Extra High", "GPT-5.5 1M (Cursor)"},
-		{"gpt-5.4-mini-none", "GPT-5.4 Mini None", "GPT-5.4 Mini (Cursor)"},
-		{"grok-4.7-low", "Grok 4.7  Low", "Grok 4.7 (Cursor)"},
-		{"kimi-k3-low", "Kimi K3 Low", "Kimi K3 (Cursor)"},
-		{"muse-wonder-1.0-minimal", "Muse Wonder  Minimal", "Muse Wonder (Cursor)"},
-		{"grok-4.7-high-fast", "Grok 4.7 High Fast", "Grok 4.7 (Fast) (Cursor)"},
-		{"model-fast-low", "Model Low (Fast)", "Model (Fast) (Cursor)"},
-		{"model-low", "Model Low (Cursor)", "Model (Cursor)"},
-		{"model-low", "Model (Low) [NO ZDR]", "Model [NO ZDR] (Cursor)"},
-		{"model", "High Fidelity", "High Fidelity (Cursor)"},
+		{"claude-fable-5-1-low", "Claude Fable 5.1 1M Low (NO ZDR)", "Claude Fable 5.1"},
+		{"claude-opus-5-thinking-high", "Claude Opus 5 1M Thinking", "Claude Opus 5"},
+		{"gemini-3.6-flash-minimal", "Gemini 3.6 Flash Minimal", "Gemini 3.6 Flash"},
+		{"gpt-5.6-luna-high", "GPT-5.6 Luna 1M High", "GPT-5.6 Luna"},
+		{"gpt-5.5-extra-high", "GPT-5.5 1M Extra High", "GPT-5.5"},
+		{"gpt-5.4-mini-none", "GPT-5.4 Mini None", "GPT-5.4 Mini"},
+		{"grok-4.7-low", "Grok 4.7  Low", "Grok 4.7"},
+		{"kimi-k3-low", "Kimi K3 Low", "Kimi K3"},
+		{"muse-wonder-1.0-minimal", "Muse Wonder  Minimal", "Muse Wonder"},
+		{"grok-4.7-high-fast", "Grok 4.7 High Fast", "Grok 4.7"},
+		{"model-fast-low", "Model Low (Fast)", "Model"},
+		{"model-low", "Model Low (Cursor)", "Model"},
+		{"model-low", "Model (Low) [NO ZDR]", "Model"},
+		{"model", "High Fidelity", "High Fidelity"},
+		{"model", "Model 272K (NO ZDR)", "Model"},
+		{"model", "Model 1,048,576 tokens", "Model"},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			e := NewExecutor(DefaultConfig())
@@ -44,7 +46,7 @@ func TestModelLabelsDoNotDependOnDiscoveryOrder(t *testing.T) {
 		{{ModelId: "model-low", DisplayName: "Model Low"}, {ModelId: "model-high", DisplayName: "Model High"}},
 		{{ModelId: "model-high", DisplayName: "Model High"}, {ModelId: "model-low", DisplayName: "Model Low"}},
 	} {
-		if group := groupVariants(rows)[0]; group.display != "Model (Cursor)" {
+		if group := groupVariants(rows)[0]; group.display != "Model" {
 			t.Fatalf("discovery order leaked into label: %q", group.display)
 		}
 	}
@@ -62,6 +64,9 @@ func TestFastModelsKeepSeparateIDsEffortsAndRouting(t *testing.T) {
 	models := discoverMetadata(t, e, "account", "", rows, nil)
 	if len(models) != 2 || models[0].ID != "grok-4.7" || models[1].ID != "grok-4.7-fast" {
 		t.Fatalf("fast tier collapsed: %v", models)
+	}
+	if models[0].DisplayName != "Grok 4.7" || models[1].DisplayName != "Grok 4.7 (Fast)" {
+		t.Fatalf("discovery added unnecessary labels: %v", models)
 	}
 	for _, model := range models {
 		if !reflect.DeepEqual(model.Thinking.Levels, []string{"low", "high"}) {
@@ -113,7 +118,7 @@ func TestModelListCleansExistingVariantNamesWithoutChangingCustomNames(t *testin
 	if err := json.Unmarshal(response.Body, &root); err != nil {
 		t.Fatal(err)
 	}
-	if root.Data[0]["name"] != "Grok 4.7 (Cursor)" || root.Data[0]["display_name"] != "Grok 4.7 (Cursor)" || root.Data[1]["name"] != "personal favourite" || root.Data[1]["display_name"] != "custom" {
+	if root.Data[0]["name"] != "Grok 4.7" || root.Data[0]["display_name"] != "Grok 4.7" || root.Data[1]["name"] != "personal favourite" || root.Data[1]["display_name"] != "custom" {
 		t.Fatalf("model names not corrected safely: %v", root.Data)
 	}
 }

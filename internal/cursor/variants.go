@@ -108,8 +108,6 @@ func analyseVariant(id string) (base, kind string, rank int, bare bool) {
 	return rest, kind, rank, bare
 }
 
-// groupVariants clusters discovered rows by family base ID, so one row is
-// published per model family whatever the upstream display names say.
 func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 	byBase := map[string]*variantGroup{}
 	order := []string{}
@@ -120,7 +118,7 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		base, kind, rank, bare := analyseVariant(row.ModelId)
 		group, ok := byBase[base]
 		if !ok {
-			group = &variantGroup{base: base, display: familyDisplayName(first(row.DisplayName, row.ModelId), rank > 0, strings.HasSuffix(base, "-fast")), ids: map[string]string{}, rank: map[string]int{}}
+			group = &variantGroup{base: base, display: familyDisplayName(first(row.DisplayName, row.ModelId), rank > 0), ids: map[string]string{}, rank: map[string]int{}}
 			byBase[base] = group
 			order = append(order, base)
 		}
@@ -138,9 +136,6 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 	out := make([]*variantGroup, 0, len(order))
 	for _, base := range order {
 		group := byBase[base]
-		// Cursor vendor-prefixes some third-party families (cursor-grok-4.6)
-		// but not others (grok-4.7); publish the vendor name so catalogues
-		// match. Upstream variant IDs keep the prefix.
 		if public, ok := vendorName(base); ok && byBase[public] == nil {
 			group.base = public
 		}

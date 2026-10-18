@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -124,29 +123,20 @@ func (e *Executor) InterceptResponse(ctx context.Context, req pluginapi.Response
 		if json.Unmarshal(root[schema.list], &rows) != nil {
 			continue
 		}
-		for index, raw := range rows {
+		entries := e.modelListLabels(rows, schema.id)
+		for index, entry := range entries {
 			if ctx.Err() != nil {
 				return pluginapi.ResponseInterceptResponse{}, nil
 			}
-			var row map[string]json.RawMessage
-			if json.Unmarshal(raw, &row) != nil || row == nil {
+			if !entry.managed {
 				continue
 			}
-			var id, owner string
-			_ = json.Unmarshal(row[schema.id], &id)
-			_ = json.Unmarshal(row["owned_by"], &owner)
-			if !strings.Contains(id, "/") || owner != "" && owner != "cursor" {
+			metadataChanged := patchModelMetadata(entry.row, entry.model, schema.list == "models")
+			if !metadataChanged && !entry.changed {
 				continue
 			}
-			model, ok := e.publishedMetadata(id)
-			if !ok {
-				continue
-			}
-			if !patchModelMetadata(row, model, schema.list == "models") {
-				continue
-			}
-			patched, err := json.Marshal(row)
-			if err == nil && !bytes.Equal(patched, raw) {
+			patched, err := json.Marshal(entry.row)
+			if err == nil && !bytes.Equal(patched, rows[index]) {
 				rows[index] = patched
 				changed = true
 			}
@@ -170,16 +160,6 @@ func patchModelMetadata(row map[string]json.RawMessage, model pluginapi.ModelInf
 		if _, present := row[key]; !present {
 			put(key, value)
 		}
-	}
-	for _, key := range []string{"display_name", "name"} {
-		var existing string
-		if json.Unmarshal(row[key], &existing) == nil && existing != model.DisplayName && familyDisplayName(existing, true, strings.HasSuffix(model.ID, "-fast")) == model.DisplayName {
-			put(key, model.DisplayName)
-		}
-	}
-	putMissing("display_name", model.DisplayName)
-	if _, present := row["name"]; !present {
-		put("name", model.DisplayName)
 	}
 	contextKey, outputKey := "context_length", "max_completion_tokens"
 	if codex {
