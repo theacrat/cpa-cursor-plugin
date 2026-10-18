@@ -26,7 +26,9 @@ func TestAnalyseVariant(t *testing.T) {
 		bare           bool
 	}{
 		{"claude-opus-4-8-high", "claude-opus-4-8", "high", 10, false},
-		{"claude-opus-4-8-thinking-high-fast", "claude-opus-4-8", "high", 31, false},
+		{"claude-opus-4-8-thinking-high-fast", "claude-opus-4-8-fast", "high", 31, false},
+		{"model-fast", "model-fast", "default", 11, true},
+		{"model-fast-extra-high", "model-fast", "xhigh", 31, false},
 		{"gemini-3.6-flash-minimal", "gemini-3.6-flash", "minimal", 10, false},
 		{"claude-4.5-sonnet-thinking", "claude-4.5-sonnet", "thinking", 10, false},
 		{"claude-opus-4-8-xhigh", "claude-opus-4-8", "xhigh", 10, false},
@@ -58,8 +60,8 @@ func TestGroupVariantsCollapse(t *testing.T) {
 		{ModelId: "gemini-3.1-pro", DisplayName: "Gemini 3.1 Pro"},
 	}
 	groups := groupVariants(rows)
-	if len(groups) != 3 {
-		t.Fatalf("groups = %d, want 3", len(groups))
+	if len(groups) != 4 {
+		t.Fatalf("groups = %d, want 4", len(groups))
 	}
 	opus := groups[0]
 	if opus.base != "claude-opus-4-8" {
@@ -71,12 +73,15 @@ func TestGroupVariantsCollapse(t *testing.T) {
 	if !opus.hasBare && len(advertisedLevels(opus)) != 2 {
 		t.Fatalf("effort group should advertise discovered levels: %#v", opus)
 	}
-	sonnet := groups[1]
+	if fast := groups[1]; fast.base != "claude-opus-4-8-fast" || fast.ids["high"] != "claude-opus-4-8-high-fast" {
+		t.Fatalf("fast tier not selectable: %#v", fast)
+	}
+	sonnet := groups[2]
 	if sonnet.ids["default"] != "claude-4.5-sonnet" || sonnet.ids["thinking"] != "claude-4.5-sonnet-thinking" || !sonnet.hasBare {
 		t.Fatalf("sonnet group: %#v", sonnet)
 	}
-	if groups[2].base != "gemini-3.1-pro" || len(advertisedLevels(groups[2])) != 0 {
-		t.Fatalf("singleton should not advertise levels: %#v", groups[2])
+	if groups[3].base != "gemini-3.1-pro" || len(advertisedLevels(groups[3])) != 0 {
+		t.Fatalf("singleton should not advertise levels: %#v", groups[3])
 	}
 }
 

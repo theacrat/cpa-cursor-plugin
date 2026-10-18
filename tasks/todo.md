@@ -1,7 +1,7 @@
-# verified model metadata tasks
+# model label and fast-tier tasks
 
-- [x] verify upstream metadata fields and implement conservative family matching.
-- [x] expose real reasoning and executor tool capabilities.
-- [x] restore metadata on existing namespaced Cursor list rows.
-- [x] verify native dispatch and pinned-host model-list behaviour.
-- [x] complete review, full checks and documentation without deployment.
+- [x] separate speed tiers and preserve exact effort routing.
+- [x] clean labels across all model families and preserve custom names.
+- [x] verify metadata, host lists and native ABI behaviour.
+- [ ] review, build arm64 and deploy without retained backups.
+- [ ] verify the live catalogue and remove temporary files.

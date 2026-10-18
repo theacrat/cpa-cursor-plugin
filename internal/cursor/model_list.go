@@ -171,6 +171,12 @@ func patchModelMetadata(row map[string]json.RawMessage, model pluginapi.ModelInf
 			put(key, value)
 		}
 	}
+	for _, key := range []string{"display_name", "name"} {
+		var existing string
+		if json.Unmarshal(row[key], &existing) == nil && existing != model.DisplayName && familyDisplayName(existing, true, strings.HasSuffix(model.ID, "-fast")) == model.DisplayName {
+			put(key, model.DisplayName)
+		}
+	}
 	putMissing("display_name", model.DisplayName)
 	if _, present := row["name"]; !present {
 		put("name", model.DisplayName)

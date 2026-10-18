@@ -1,25 +1,27 @@
-# verified model metadata
+# model labels and fast tiers
 
-Implement the approved contract in `docs/model-metadata.md` without deployment.
+Fix misleading effort-labelled model names across every Cursor model family,
+expose discovered fast tiers separately and deploy to `root@192.168.1.1`.
 
 ## decisions
 
-Use Cursor's authenticated metadata and the executor's verified capabilities, never
-model-name guesses or another provider's limits. Restore metadata stripped by the
-host only for known namespaced Cursor rows, with no network calls on list requests.
+Keep existing standard route IDs, suffix fast routes with `-fast`, and keep low/high
+in each route's reasoning selector. Clean only recognised trailing effort/speed
+labels while retaining model identity and annotations. Add `(Cursor)` to provider
+labels, preserve custom names and leave other providers untouched.
 
 ## slices
 
 | slice | acceptance | verification |
 | --- | --- | --- |
-| discovery | match upstream family and variant metadata without inventing limits or image support | optional catalogue and malformed protobuf fixtures |
-| reasoning | expose only discovered reasoning controls without changing execution fallback | variant tests |
-| presentation | enrich existing Cursor model-list rows and preserve other providers | list interception and native dispatch fixtures |
-| host contract | preserve metadata through prefixing and host list serialisation | pinned-host fixture |
+| grouping | standard and fast tiers keep distinct upstream IDs and effort tables | variant and metadata tests |
+| labels | all families have neutral effort-independent names and explicit provider/speed labels | fixture table and model-list tests |
+| deployment | arm64 library loads, live labels are clean and provider routes stay separate | native ABI fixture and authenticated catalogue checks |
 
 ## final gate
 
 Review the complete diff, then run `mise run check` and `mise run test-host` without
 concurrent source edits.
 
-No remote publish, deployment or live credential use is required.
+No repository publication is required. Deploy the verified arm64 build without
+configuration changes or retained backups, then remove temporary remote files.

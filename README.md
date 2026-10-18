@@ -55,9 +55,15 @@ prefixes for other accounts that have one.
 
 This is a breaking change: saved configs must switch to `cursor/<id>`.
 
+Picker labels use the model family name plus `(Cursor)`, without effort words
+such as Low or High. Discovered fast tiers are separate `cursor/<id>-fast` models
+labelled `(Fast) (Cursor)`, each with its own thinking selector. Existing standard
+model IDs remain unchanged. The legacy `gpt-5.5-extra` family is folded into
+`gpt-5.5` with `xhigh` effort, because `extra-high` names the effort, not a model.
+
 ## Thinking switcher
 
-Each Cursor model appears once, with its reasoning efforts behind CPA's
+Each Cursor model and speed tier appears once, with its reasoning efforts behind CPA's
 native `model(level)` suffix: `cursor/claude-opus-4-8` for the default effort,
 `cursor/claude-opus-4-8(high)` for high, and so on through `minimal`, `low`,
 `medium`, `high`, `xhigh` and `max`. A plain `reasoning_effort` request

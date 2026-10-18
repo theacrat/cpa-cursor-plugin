@@ -80,6 +80,11 @@ including explicit false values and empty reasoning controls, remain authoritati
 Snapshots are replaced on successful discovery, discarded on reload/shutdown and
 never persisted with credentials.
 
+Standard and fast tiers keep separate snapshots and exact upstream variant maps.
+Recognised trailing effort labels are removed from picker names and provider/speed
+markers are explicit. An existing effort-labelled name is corrected only when its
+normalised label matches the same discovered family, preserving custom names.
+
 ## verification record
 
 Focused fixtures were observed failing before their implementations, including

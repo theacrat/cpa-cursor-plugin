@@ -18,12 +18,14 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   display names only by accident and CPA's v8 model list drops provider
   display names entirely (a same-owner catalog backfill would otherwise
   re-duplicate every pair). Trailing `-thinking|-minimal|-low|-medium|-high|`
-  `-xhigh|-max|-fast|-none` segments fold into the family; the first
-  effort token from the right sets the kind, anything else is kind `default`.
+  `-xhigh|-extra-high|-max|-none` segments fold into the family; the first
+  effort token from the right sets the kind, with `extra-high` normalised to
+  `xhigh`. Anything else is kind `default`.
   One row per family carries `ThinkingSupport` with its discovered canonical
-  levels, so management clients can render a thinking switcher. Speed-tier
-  (`-fast`) and `none` variants fold into the family table rather than the
-  list; the standard tier wins each kind.
+  levels, so management clients can render a thinking switcher. Speed tiers
+  are separate families: `model-fast` preserves fast upstream IDs and has its own
+  effort table. Standard model IDs never select fast upstream variants.
+  `none` variants fold into the tier's default kind.
   Only discovered effort kinds are advertised, with a thinking-only variant
   represented by the host-supported `high` level rather than an invented effort list.
 - The executor resolves the variant per request and sends that variant ID
@@ -57,6 +59,10 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   by the host as unknown models before reaching the plugin.
 - Every published row declares `text` output modality: Cursor agent models
   only answer in text through this executor.
+- Display names remove trailing effort controls while preserving annotations such
+  as `(NO ZDR)`. Names carry `(Cursor)` and fast rows also carry `(Fast)`, so a
+  provider difference cannot be mistaken for a speed tier. Custom names remain
+  untouched unless they match the same normalised family label.
 
 ## Acceptance
 

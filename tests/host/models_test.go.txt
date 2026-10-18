@@ -36,19 +36,22 @@ func TestCursorPrefixKeepsNativeProvidersSeparate(t *testing.T) {
 			t.Fatal(err)
 		}
 		var native []pluginapi.ModelInfo
-		if err := json.Unmarshal(raw, &native); err != nil || len(native) != 1 {
+		if err := json.Unmarshal(raw, &native); err != nil || len(native) != 2 {
 			t.Fatal("invalid Cursor metadata fixture")
 		}
 		model := native[0]
+		models[0].DisplayName = model.DisplayName
 		models[0].ContextLength = int(model.ContextLength)
 		models[0].InputTokenLimit = int(model.InputTokenLimit)
 		models[0].SupportedInputModalities = model.SupportedInputModalities
 		models[0].SupportedOutputModalities = model.SupportedOutputModalities
 		models[0].SupportedParameters = model.SupportedParameters
 		models[0].Thinking = &internalregistry.ThinkingSupport{Levels: model.Thinking.Levels}
+		fast := native[1]
+		models = append(models, &ModelInfo{ID: fast.ID, OwnedBy: "cursor", DisplayName: fast.DisplayName, ContextLength: int(fast.ContextLength), Thinking: &internalregistry.ThinkingSupport{Levels: fast.Thinking.Levels}})
 	}
 	registry.RegisterClient("review-cursor", "cursor", applyModelPrefixes(models, fixture.Prefix, true))
-	for model, want := range map[string]string{"review-gpt": "codex", "review-claude": "claude", "cursor/review-gpt": "cursor", "cursor/review-claude": "cursor"} {
+	for model, want := range map[string]string{"review-gpt": "codex", "review-claude": "claude", "cursor/review-gpt": "cursor", "cursor/review-gpt-fast": "cursor", "cursor/review-claude": "cursor"} {
 		providers := registry.GetModelProviders(model)
 		if len(providers) != 1 || providers[0] != want {
 			t.Fatalf("model=%q providers=%v want=%q", model, providers, want)

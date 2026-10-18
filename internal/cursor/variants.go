@@ -26,8 +26,6 @@ const (
 	levelMax     = "max"
 )
 
-// familyTokens are trailing ID segments folded into one model family.
-// Effort tokens double as switcher kinds; fast/none only affect ranking.
 var familyTokens = map[string]bool{
 	"thinking": true, levelMinimal: true, levelLow: true, levelMedium: true,
 	levelHigh: true, levelXHigh: true, levelMax: true, "fast": true, "none": true,
@@ -68,14 +66,11 @@ type variantFetch struct {
 	err   error
 }
 
-// analyseVariant folds a discovered model ID into its family base, effort
-// kind and selection rank. Trailing family tokens are stripped inside out;
-// the rightmost effort token sets the kind and the standard (non-fast) tier
-// outranks fast ones so each kind keeps a single deterministic ID.
 func analyseVariant(id string) (base, kind string, rank int, bare bool) {
 	rest := id
 	kind = defaultKind
 	fast := false
+	bare = true
 	for {
 		i := strings.LastIndex(rest, "-")
 		if i <= 0 || strings.HasSuffix(rest[:i], "/") {
@@ -91,6 +86,12 @@ func analyseVariant(id string) (base, kind string, rank int, bare bool) {
 		if !familyTokens[token] {
 			break
 		}
+		bare = false
+		if token == "high" && strings.HasSuffix(strings.ToLower(rest[:i]), "-extra") {
+			token = levelXHigh
+			i -= len("-extra")
+			rank += 10
+		}
 		if effortTokens[token] && kind == defaultKind {
 			kind = token
 		}
@@ -102,8 +103,9 @@ func analyseVariant(id string) (base, kind string, rank int, bare bool) {
 	}
 	if fast {
 		rank++
+		rest += "-fast"
 	}
-	return rest, kind, rank, rank == 0
+	return rest, kind, rank, bare
 }
 
 // groupVariants clusters discovered rows by family base ID, so one row is
@@ -118,7 +120,7 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		base, kind, rank, bare := analyseVariant(row.ModelId)
 		group, ok := byBase[base]
 		if !ok {
-			group = &variantGroup{base: base, display: first(row.DisplayName, row.ModelId), ids: map[string]string{}, rank: map[string]int{}}
+			group = &variantGroup{base: base, display: familyDisplayName(first(row.DisplayName, row.ModelId), rank > 0, strings.HasSuffix(base, "-fast")), ids: map[string]string{}, rank: map[string]int{}}
 			byBase[base] = group
 			order = append(order, base)
 		}
