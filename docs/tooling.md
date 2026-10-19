@@ -66,3 +66,5 @@ are disabled and disposable source/build copies are removed after the run.
 Add `--expect-stateless` when verifying the unmodified host baseline. Both primary
 response modes must then close their upstream run normally without probing any
 retained callback.
+Add `--race` to instrument both the native library and its host fixture with Go's
+race detector.

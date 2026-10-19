@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("host", type=Path)
     parser.add_argument("--plugin", type=Path)
     parser.add_argument("--expect-stateless", action="store_true")
+    parser.add_argument("--race", action="store_true")
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     host_source = arguments.host.resolve(strict=True)
@@ -51,13 +52,20 @@ def main() -> None:
             "CGO_ENABLED": "1", "TMPDIR": str(directory),
             "GOPROXY": "off", "GOSUMDB": "off", "GOTOOLCHAIN": "local",
         })
-        subprocess.run(["bash", "scripts/build.sh"], cwd=plugin, env=environment, check=True)
         operating_system = subprocess.check_output(["go", "env", "GOHOSTOS"], env=environment, text=True).strip()
         architecture = subprocess.check_output(["go", "env", "GOHOSTARCH"], env=environment, text=True).strip()
         extension = {"linux": "so", "darwin": "dylib"}.get(operating_system)
         if extension is None:
             raise SystemExit("native live-host fixture requires Linux or macOS")
         library = plugin / "dist" / f"{operating_system}-{architecture}" / f"cpa-cursor.{extension}"
+        if arguments.race:
+            library.parent.mkdir(parents=True)
+            subprocess.run(
+                ["go", "build", "-race", "-trimpath", "-buildmode=c-shared", "-o", str(library), "./cmd/cpa-cursor"],
+                cwd=plugin, env=environment, check=True,
+            )
+        else:
+            subprocess.run(["bash", "scripts/build.sh"], cwd=plugin, env=environment, check=True)
         environment.update({
             "CPA_LIVE_PLUGIN_LIBRARY": str(library),
             "CPA_LIVE_FIXTURE_DIRECTORY": str(directory),
@@ -69,8 +77,11 @@ def main() -> None:
                 str(plugin / "tests/host/live_loop_test.go.txt"),
         }}))
         print(f"live native fixture host={host_revision} plugin={plugin_revision}", flush=True)
+        command = ["go", "test"]
+        if arguments.race:
+            command.append("-race")
         subprocess.run(
-            ["go", "test", "-mod=readonly", "-overlay", str(overlay),
+            command + ["-mod=readonly", "-overlay", str(overlay),
              "./internal/pluginhost", "-run", "^TestCursorLiveNativeToolLoop$",
              "-count=1", "-timeout", "90s", "-v"],
             cwd=host, env=environment, check=True,
