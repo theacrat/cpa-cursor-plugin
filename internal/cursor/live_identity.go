@@ -13,6 +13,9 @@ import (
 )
 
 func liveOwner(req pluginapi.ExecutorRequest) string {
+	if path, _ := req.Metadata["request_path"].(string); path != "/v1/chat/completions" {
+		return ""
+	}
 	if req.AuthID == "" || req.AuthProvider != "cursor" || singleIdentityHeader(req.Headers, "X-Cpa-Request-Kind") != "primary" {
 		return ""
 	}

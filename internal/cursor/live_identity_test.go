@@ -10,7 +10,7 @@ func TestLiveToolLoopIdentityUsesActualSessionAndCaller(t *testing.T) {
 	req.AuthID = "account"
 	req.AuthProvider = "cursor"
 	req.Headers = map[string][]string{"X-Opencode-Session-Id": {"actual"}, "X-Opencode-Session": {"shared-parent"}, "X-Cpa-Request-Kind": {"primary"}}
-	req.Metadata = map[string]any{"caller_scope": strings.Repeat("a", 64)}
+	req.Metadata = map[string]any{"caller_scope": strings.Repeat("a", 64), "request_path": "/v1/chat/completions"}
 	first := liveOwner(req)
 	if first == "" {
 		t.Fatal("complete ownership was rejected")
@@ -51,5 +51,19 @@ func TestLiveToolLoopCompatibilityIncludesOriginalFunctionNames(t *testing.T) {
 	}
 	if liveCompatibility(first, a) == liveCompatibility(second, b) {
 		t.Fatal("different original client functions share retained compatibility")
+	}
+}
+
+func TestLiveToolLoopIdentityExcludesUnverifiedDeliveryProtocols(t *testing.T) {
+	req := liveRequest(nil)
+	for _, path := range []string{"", "/v1/responses", "/v1/messages", "/v1/completions", "/v1/chat/completions/other"} {
+		req.Metadata["request_path"] = path
+		if liveOwner(req) != "" {
+			t.Fatalf("unverified delivery protocol %q gained retained ownership", path)
+		}
+	}
+	req.Metadata["request_path"] = "/v1/chat/completions"
+	if liveOwner(req) == "" {
+		t.Fatal("verified chat-completions delivery was rejected")
 	}
 }

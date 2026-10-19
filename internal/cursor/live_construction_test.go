@@ -26,6 +26,7 @@ type liveConstructionHost struct {
 	gateCapability    bool
 	capabilityEntered chan struct{}
 	capabilityRelease chan struct{}
+	capabilityOnce    sync.Once
 }
 
 type liveConstructionScope struct {
@@ -59,7 +60,7 @@ func (h *liveConstructionHost) unblock() { h.releaseOnce.Do(func() { close(h.rel
 
 func (h *liveConstructionHost) SupportsRetainedHTTP() bool {
 	if h.gateCapability {
-		close(h.capabilityEntered)
+		h.capabilityOnce.Do(func() { close(h.capabilityEntered) })
 		<-h.capabilityRelease
 	}
 	return true

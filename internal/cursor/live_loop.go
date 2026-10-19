@@ -70,6 +70,7 @@ func (s *liveSession) close() {
 		s.cancel()
 		if s.transport != nil {
 			s.transport.close()
+			<-s.done
 		}
 		if s.scope != nil {
 			_ = s.scope.Close()
@@ -78,9 +79,16 @@ func (s *liveSession) close() {
 }
 
 func (e *Executor) liveSession(requestCtx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, host RetainedHTTPHost) (*liveSession, bool, error) {
+	if err := requestCtx.Err(); err != nil {
+		return nil, false, err
+	}
 	owner := liveOwner(req)
 	compatible := liveCompatibility(req, b)
 	e.liveMu.Lock()
+	if err := requestCtx.Err(); err != nil {
+		e.liveMu.Unlock()
+		return nil, false, err
+	}
 	if e.live == nil {
 		e.live = map[string]*liveSession{}
 	}
@@ -93,9 +101,9 @@ func (e *Executor) liveSession(requestCtx context.Context, req pluginapi.Executo
 		if session.closed || session.compatible != compatible || time.Since(session.last) > time.Hour {
 			delete(e.live, owner)
 			session.closed = true
-			session.mu.Unlock()
 			e.liveMu.Unlock()
 			session.close()
+			session.mu.Unlock()
 			return e.liveSession(requestCtx, req, b, host)
 		}
 	}
@@ -123,6 +131,12 @@ func (e *Executor) liveSession(requestCtx context.Context, req pluginapi.Executo
 	session.retainedBytes.Store(int64(b.blobs.size))
 	e.live[owner] = session
 	e.liveMu.Unlock()
+	if err := requestCtx.Err(); err != nil {
+		cancel()
+		e.retireLive(session)
+		session.mu.Unlock()
+		return nil, false, err
+	}
 	scope, err := host.OpenScope(ctx)
 	if err != nil {
 		cancel()
@@ -291,7 +305,13 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 	stopCancel := context.AfterFunc(ctx, session.cancel)
 	defer stopCancel()
 	startOutput := session.output
-	defer func() { result.output = session.output - startOutput; result.total = session.total }()
+	countUsage := true
+	defer func() {
+		if countUsage {
+			result.output = session.output - startOutput
+			result.total = session.total
+		}
+	}()
 	if session.expiry != nil {
 		session.generation.Add(1)
 		session.expiry.Stop()
@@ -306,6 +326,7 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 		if len(transcript.Messages) > 0 && transcript.Messages[len(transcript.Messages)-1].Role == "user" {
 			e.retireLive(session)
 			stopCancel()
+			countUsage = false
 			return e.runLiveAttempt(ctx, req, b, onText, tableTook, host, progress)
 		}
 		results, matchErr := session.results(req.Payload)

@@ -27,6 +27,8 @@ type liveFixtureScope struct {
 	lastResult                     *pb.McpResult
 	afterFirst                     bool
 	duplicateExec                  bool
+	rounds                         int
+	firstResult                    *pb.McpResult
 }
 
 func (h *liveFixtureHost) SupportsRetainedHTTP() bool                           { return true }
@@ -98,8 +100,16 @@ func (s *liveFixtureScope) Do(_ context.Context, req pluginapi.HTTPRequest) (plu
 			return pluginapi.HTTPResponse{}, errors.New("wrong pending execution")
 		}
 		s.results++
+		if s.firstResult == nil {
+			s.firstResult = proto.Clone(result.GetMcpResult()).(*pb.McpResult)
+		}
 		s.lastResult = proto.Clone(result.GetMcpResult()).(*pb.McpResult)
 		if s.results < s.batch {
+			return pluginapi.HTTPResponse{StatusCode: 200}, nil
+		}
+		if s.results < s.rounds {
+			frame, _ := frameMessage(&pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: uint32(7 + s.results), ExecId: "upstream-exec", Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ProviderIdentifier: "cpa", ToolCallId: fmt.Sprintf("upstream\nround%d", s.results)}}}}})
+			s.chunks <- pluginapi.HTTPStreamChunk{Payload: frame}
 			return pluginapi.HTTPResponse{StatusCode: 200}, nil
 		}
 		for _, msg := range []*pb.AgentServerMessage{update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_TextDelta{TextDelta: &pb.TextDeltaUpdate{Text: "continued after actual result"}}}), endTurn()} {
@@ -115,7 +125,7 @@ func liveRequest(host pluginapi.HostHTTPClient) pluginapi.ExecutorRequest {
 	req.HTTPClient = host
 	req.AuthID = "account"
 	req.AuthProvider = "cursor"
-	req.Metadata = map[string]any{"caller_scope": strings.Repeat("a", 64)}
+	req.Metadata = map[string]any{"caller_scope": strings.Repeat("a", 64), "request_path": "/v1/chat/completions"}
 	req.Headers = http.Header{"X-Opencode-Session-Id": {"session"}, "X-Cpa-Request-Kind": {"primary"}}
 	return req
 }
@@ -186,6 +196,9 @@ func TestLiveToolLoopBatchesEveryCallAndPreservesToolErrors(t *testing.T) {
 	defer scope.mu.Unlock()
 	if scope.runs != 1 || scope.results != 2 || scope.lastResult.GetError().GetError() != "actual failure" {
 		t.Fatal("batch result ownership or actual error lost")
+	}
+	if scope.firstResult.GetSuccess().GetContent()[0].GetText().GetText() != content {
+		t.Fatal("large skill content was truncated or changed")
 	}
 }
 
