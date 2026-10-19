@@ -107,6 +107,7 @@ type builtRequest struct {
 	tools     []*pb.McpToolDefinition
 	wire      map[string]string
 	resolve   map[string]string
+	callIDs   map[string]bool
 	id, model string
 }
 
@@ -191,11 +192,13 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 		seen[t.Function.Name] = true
 		names = append(names, t.Function.Name)
 	}
+	b.callIDs = make(map[string]bool)
 	for _, message := range chat.Messages {
 		if message.Role != "assistant" {
 			continue
 		}
 		for _, call := range message.ToolCalls {
+			b.callIDs[call.ID] = true
 			if call.Function.Name == "" {
 				return nil, errors.New("invalid transcript tool call")
 			}

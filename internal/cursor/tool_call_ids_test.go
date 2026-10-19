@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -224,6 +225,53 @@ func TestToolCallIDBoundaryChecksEveryByteAndHashesInvalidUTF8(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("byte %d produced an unexpected public ID", character)
+		}
+	}
+}
+
+func TestToolCallIDBoundaryRejectsHistoricalPublicIDCollisions(t *testing.T) {
+	digest := sha256.Sum256([]byte(grokCompositeToolID))
+	hashed := "call_" + base64.RawURLEncoding.EncodeToString(digest[:])
+	for _, test := range []struct {
+		name, historical, upstream string
+	}{
+		{"normalised ID matches safe history", hashed, grokCompositeToolID},
+		{"safe upstream ID matches history", "call_historic", "call_historic"},
+		{"unsafe history remains distinct", grokCompositeToolID, grokCompositeToolID},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(test.name+map[bool]string{false: "/execute", true: "/stream"}[stream], func(t *testing.T) {
+				handled := make(chan struct{})
+				_, e := tlsFixture(t, func(w http.ResponseWriter, request *http.Request) {
+					defer close(handled)
+					readClient(t, request.Body)
+					w.Header().Set("Content-Type", "application/connect+proto")
+					w.WriteHeader(200)
+					w.(http.Flusher).Flush()
+					writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: 1, Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_skill", ProviderIdentifier: "cpa", ToolCallId: test.upstream}}}}})
+				})
+				req := testRequest()
+				req.Payload = []byte(fmt.Sprintf(`{"messages":[{"role":"user","content":"load the skill"},{"role":"assistant","tool_calls":[{"id":%q,"type":"function","function":{"name":"skill","arguments":"{}"}}]},{"role":"tool","tool_call_id":%q,"content":"completed skill"},{"role":"user","content":"continue"}],"tools":[{"type":"function","function":{"name":"skill"}}]}`, test.historical, test.historical))
+				var err error
+				if stream {
+					_, err = e.ExecuteStream(context.Background(), req)
+				} else {
+					_, err = e.Execute(context.Background(), req)
+				}
+				<-handled
+				if test.historical == grokCompositeToolID {
+					if err != nil {
+						t.Fatalf("distinct legacy historical ID was rewritten or blocked: %v", err)
+					}
+					return
+				}
+				if err == nil || err.Error() != "Cursor tool call ID conflicts with completed history" {
+					t.Fatalf("historical public ID collision was not rejected safely: %v", err)
+				}
+				if strings.Contains(err.Error(), test.historical) || strings.Contains(err.Error(), test.upstream) {
+					t.Fatal("ID collision error leaked raw identifiers")
+				}
+			})
 		}
 	}
 }
