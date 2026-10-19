@@ -40,20 +40,24 @@ func (h hostHTTP) scope(ctx context.Context, method, id string) (cursor.Retained
 		ID         string `json:"scope_id"`
 		Attachment string `json:"attachment_id"`
 	}
-	if err := hostDecode(method, request, &response); err != nil {
-		return nil, err
-	}
+	err := hostDecode(method, request, &response)
 	if id != "" && response.ID == "" {
 		response.ID = id
 	}
-	if response.ID == "" || response.Attachment == "" {
-		return nil, errors.New("host returned an invalid retained scope")
+	scope := &retainedHostScope{hostHTTP: hostHTTP{workers: h.workers, retained: true, scopeID: response.ID}, callback: h.callbackID, attachment: response.Attachment}
+	if err == nil && (response.ID == "" || response.Attachment == "" || id != "" && response.ID != id) {
+		err = errors.New("host returned an invalid retained scope")
 	}
-	if err := ctx.Err(); err != nil {
-		_ = hostDecode("host.http.scope_close", map[string]string{"scope_id": response.ID, "attachment_id": response.Attachment}, nil)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		if response.ID != "" && response.Attachment != "" {
+			_ = scope.Close()
+		}
 		return nil, err
 	}
-	return &retainedHostScope{hostHTTP: hostHTTP{workers: h.workers, retained: true, scopeID: response.ID}, callback: h.callbackID, attachment: response.Attachment}, nil
+	return scope, nil
 }
 
 func (h *retainedHostScope) ID() string { return h.scopeID }
