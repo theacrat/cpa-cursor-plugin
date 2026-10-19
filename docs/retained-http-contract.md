@@ -3,8 +3,8 @@
 ## status
 
 The operator approved live client-tool loops and the necessary CPA host extension.
-This wire contract is proposed for the implementation-plan review. Names in this
-document are new APIs, not methods available in the deployed host.
+The operator approved this wire contract and all required compatibility changes.
+Names in this document are new APIs, not methods available in the deployed host.
 
 Target host baseline: CLIProxyAPI v8.0.29, commit
 `5fc580b1d72d87a7bcfe5cfb6f479c1aea5625b3`.
@@ -108,7 +108,7 @@ the client chain. A proposed `x-cpa-request-kind` header carries exactly `primar
 `compaction`, `generate` or `title`, from the existing OpenCode HTTP hook's `kind`.
 The host pairs this client assertion with authenticated scope. Only `primary`
 requests may park. Missing/invalid purpose stays stateless. This client-hook change
-requires separate approval for the provider integration repository.
+is approved for the provider integration repository.
 
 On attach, derive the binding again from the new request. Disabled/replaced/removed
 credentials, different callers/sessions, model or catalogue changes, incompatible

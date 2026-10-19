@@ -29,12 +29,15 @@ var callHost = func(string, any) (json.RawMessage, error) {
 type hostHTTP struct {
 	callbackID string
 	workers    *sync.WaitGroup
+	retained   bool
+	scopeID    string
 }
 
 type hostRequest struct {
 	pluginapi.HTTPRequest
 	CallbackID  string `json:"host_callback_id,omitempty"`
 	OperationID string `json:"operation_id,omitempty"`
+	ScopeID     string `json:"scope_id,omitempty"`
 }
 
 func hostDecode(method string, request, response any) error {
@@ -48,8 +51,6 @@ func hostDecode(method string, request, response any) error {
 	return nil
 }
 
-// An operation is opened before Do so cancellation can interrupt the C callback
-// while it is blocked in connection setup or response-body reads.
 func (h hostHTTP) operation(ctx context.Context) (string, func(), error) {
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
@@ -57,7 +58,13 @@ func (h hostHTTP) operation(ctx context.Context) (string, func(), error) {
 	var opened struct {
 		ID string `json:"operation_id"`
 	}
-	if err := hostDecode(pluginabi.MethodHostHTTPOperationOpen, map[string]string{"host_callback_id": h.callbackID}, &opened); err != nil {
+	identity := map[string]string{}
+	if h.scopeID != "" {
+		identity["scope_id"] = h.scopeID
+	} else {
+		identity["host_callback_id"] = h.callbackID
+	}
+	if err := hostDecode(pluginabi.MethodHostHTTPOperationOpen, identity, &opened); err != nil {
 		return "", nil, err
 	}
 	if opened.ID == "" {
@@ -82,7 +89,7 @@ func (h hostHTTP) Do(ctx context.Context, req pluginapi.HTTPRequest) (pluginapi.
 	}
 	defer stop()
 	var resp pluginapi.HTTPResponse
-	err = hostDecode(pluginabi.MethodHostHTTPDo, hostRequest{HTTPRequest: req, CallbackID: h.callbackID, OperationID: id}, &resp)
+	err = hostDecode(pluginabi.MethodHostHTTPDo, hostRequest{HTTPRequest: req, CallbackID: h.callbackID, OperationID: id, ScopeID: h.scopeID}, &resp)
 	if ctx.Err() != nil {
 		return pluginapi.HTTPResponse{}, ctx.Err()
 	}
@@ -99,7 +106,7 @@ func (h hostHTTP) DoStream(ctx context.Context, req pluginapi.HTTPRequest) (plug
 		Headers http.Header `json:"headers"`
 		ID      string      `json:"stream_id"`
 	}
-	err = hostDecode(pluginabi.MethodHostHTTPDoStream, hostRequest{HTTPRequest: req, CallbackID: h.callbackID, OperationID: id}, &opened)
+	err = hostDecode(pluginabi.MethodHostHTTPDoStream, hostRequest{HTTPRequest: req, CallbackID: h.callbackID, OperationID: id, ScopeID: h.scopeID}, &opened)
 	if err != nil || ctx.Err() != nil {
 		stop()
 		if ctx.Err() != nil {

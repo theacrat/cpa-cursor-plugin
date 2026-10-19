@@ -2,8 +2,8 @@
 
 - [x] Complete the earlier provider/tool/metadata/public-ID fixes and reviews.
 - [x] Obtain approval for the live-loop specification and CPA host scope.
-- [ ] Approve the ordered plan and freeze the retained-scope wire contract.
-- [ ] Resolve explicit request-purpose propagation or its conservative fallback.
+- [x] Approve the ordered plan and freeze the retained-scope wire contract.
+- [x] Approve provider request-purpose propagation with conservative fallback.
 
 ## L01: host wire contract
 

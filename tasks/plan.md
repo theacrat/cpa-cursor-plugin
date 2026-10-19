@@ -4,8 +4,8 @@
 
 The operator approved the live-loop specification and the narrowly scoped CPA
 host extension. Earlier reliability, metadata, label and public-ID work is
-complete. This plan proposes the implementation sequence for approval before
-coding. Deployment and live inference remain separate decisions.
+complete. The operator approved this implementation sequence and all required
+compatibility changes. Deployment and live inference remain separate decisions.
 
 Match the reference tool-loop behaviour without bypassing host transport policy:
 park the actual Cursor run, return a 250 ms call burst to the client, and feed its
@@ -75,8 +75,8 @@ execution and cannot consume a parked agent run.
 
 Recommended purpose propagation is a small provider-scoped HTTP hook that copies
 OpenCode's existing `kind` into `x-cpa-request-kind`. Only `primary` may park.
-This requires approval for the provider integration repository in addition to the
-already approved host and Cursor plugin. Without it, that client stays stateless.
+This is approved for the provider integration repository in addition to the
+host and Cursor plugin. Without the header, that client stays stateless.
 
 ### plugin state and replay
 
@@ -134,8 +134,7 @@ No live credentials, requests, deployments, pushes or service restarts are part
 of these gates. Independent reviewers must clear implementation and privacy
 findings, with fixes re-tested and re-reviewed before handoff.
 
-## remaining approval gate
+## implementation gate
 
-Approve the ordered plan and the small provider integration change that propagates
-request purpose. The proposed retained HTTP wire contract is frozen before writing
-either side. No implementation has started while this plan is being prepared.
+The plan, provider integration and retained HTTP wire contract are approved.
+Implement in isolated branches with the stated tests and independent review.
