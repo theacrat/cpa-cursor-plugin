@@ -234,7 +234,17 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				return done(r, err)
 			}
 		case *pb.AgentServerMessage_InteractionQuery:
-			return done(r, errors.New("Cursor interaction query requires an unsupported interactive approval flow"))
+			reply, err := interactionReply(m.InteractionQuery, b.tools)
+			if err != nil {
+				return done(r, err)
+			}
+			rejectedTools++
+			if rejectedTools > maxRejectedToolCalls {
+				return done(r, errors.New("Cursor repeatedly requested unsupported interactions; no approval or answer was provided"))
+			}
+			if err := t.send(reply); err != nil {
+				return done(r, err)
+			}
 		case *pb.AgentServerMessage_ExecServerControlMessage:
 		default:
 			return done(r, errors.New("unsupported Cursor server message; protocol schema may have changed"))
