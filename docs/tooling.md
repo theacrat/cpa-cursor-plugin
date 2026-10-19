@@ -47,3 +47,9 @@ contract and how to smoke-test an existing shared library.
 under `.scratch`, including provider registry separation, API-key refresh scheduling
 and native thinking translation. It does not modify the dependency cache or use
 live credentials.
+
+`python3 -I scripts/check-live-mutations.py` applies isolated Go overlays to four
+live-loop guards and verifies that the targeted regressions fail. It checks
+repeated-prefix progress, earlier history ownership, actual session identity and
+upstream execution identity. Source files are not modified. Disposable overlays
+are created under `.scratch` and removed after each check.
