@@ -67,3 +67,17 @@ func TestLiveToolLoopIdentityExcludesUnverifiedDeliveryProtocols(t *testing.T) {
 		t.Fatal("verified chat-completions delivery was rejected")
 	}
 }
+
+func TestLiveToolLoopCompatibilityIncludesSelectedTeam(t *testing.T) {
+	first := testRequest()
+	first.StorageJSON = []byte(`{"type":"cursor","access_token":"fixture-access","selected_team_id":1}`)
+	second := first
+	second.StorageJSON = []byte(`{"type":"cursor","access_token":"fixture-access","selected_team_id":2}`)
+	built, err := buildRequest(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liveCompatibility(first, built) == liveCompatibility(second, built) {
+		t.Fatal("different upstream teams share a retained credential binding")
+	}
+}

@@ -55,7 +55,7 @@ func singleIdentityHeader(headers http.Header, name string) string {
 }
 
 func liveCompatibility(req pluginapi.ExecutorRequest, b *builtRequest) string {
-	token, err := executorToken(req.StorageJSON, req.AuthMetadata)
+	credential, err := credentialData(req.StorageJSON, req.AuthMetadata)
 	if err != nil {
 		return ""
 	}
@@ -73,11 +73,12 @@ func liveCompatibility(req pluginapi.ExecutorRequest, b *builtRequest) string {
 	raw, _ := json.Marshal(struct {
 		Model      string
 		Token      string
+		Team       string
 		System     []chatMessage
 		Tools      []*pbToolFingerprint
 		Max        bool
 		Parameters []byte
-	}{Model: req.Model, Token: variantCacheKey(token), System: system, Tools: toolFingerprints(b), Max: chat.MaxMode, Parameters: parameters})
+	}{Model: req.Model, Token: variantCacheKey(stringField(credential, "access_token")), Team: teamHeader(credential["selected_team_id"]), System: system, Tools: toolFingerprints(b), Max: chat.MaxMode, Parameters: parameters})
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
 }

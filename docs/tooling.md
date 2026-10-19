@@ -53,3 +53,13 @@ live-loop guards and verifies that the targeted regressions fail. It checks
 repeated-prefix progress, earlier history ownership, actual session identity and
 upstream execution identity. Source files are not modified. Disposable overlays
 are created under `.scratch` and removed after each check.
+
+`python3 -I scripts/check-live-host.py <host-checkout>` snapshots committed host
+and plugin revisions, builds the real native library, then runs the live-loop
+fixture through CPA's auth manager and Gin chat-completions handler. The host must
+descend from the pinned v8.0.29 baseline. The fixture expects the retained HTTP
+extension, so the unmodified baseline intentionally fails. Both buffered and
+streaming requests must retain exactly one upstream Run, return a real tool result
+to its execution identity and preserve complete skill content. The only network
+traffic is the fixture's randomly allocated loopback server. Dependency downloads
+are disabled and disposable source/build copies are removed after the run.
