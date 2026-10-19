@@ -1,0 +1,79 @@
+import argparse
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import tarfile
+import tempfile
+
+HOST_BASE = "5fc580b1d72d87a7bcfe5cfb6f479c1aea5625b3"
+
+
+def git(directory: Path, *arguments: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(directory), *arguments], text=True,
+    ).strip()
+
+
+def snapshot(source: Path, target: Path) -> str:
+    revision = git(source, "rev-parse", "HEAD")
+    archive = subprocess.check_output(["git", "-C", str(source), "archive", revision])
+    target.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+        bundle.extractall(target, filter="data")
+    return revision
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("host", type=Path)
+    parser.add_argument("--plugin", type=Path)
+    arguments = parser.parse_args()
+    root = Path(__file__).resolve().parent.parent
+    host_source = arguments.host.resolve(strict=True)
+    plugin_source = (arguments.plugin or root).resolve(strict=True)
+    subprocess.run(
+        ["git", "-C", str(host_source), "merge-base", "--is-ancestor", HOST_BASE, "HEAD"],
+        check=True,
+    )
+    scratch = root / ".scratch"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="live-native-host-", dir=scratch) as temporary:
+        directory = Path(temporary)
+        host = directory / "host"
+        plugin = directory / "plugin"
+        host_revision = snapshot(host_source, host)
+        plugin_revision = snapshot(plugin_source, plugin)
+        environment = os.environ.copy()
+        environment.update({
+            "CGO_ENABLED": "1", "TMPDIR": str(directory),
+            "GOPROXY": "off", "GOSUMDB": "off", "GOTOOLCHAIN": "local",
+        })
+        subprocess.run(["bash", "scripts/build.sh"], cwd=plugin, env=environment, check=True)
+        operating_system = subprocess.check_output(["go", "env", "GOHOSTOS"], env=environment, text=True).strip()
+        architecture = subprocess.check_output(["go", "env", "GOHOSTARCH"], env=environment, text=True).strip()
+        extension = {"linux": "so", "darwin": "dylib"}.get(operating_system)
+        if extension is None:
+            raise SystemExit("native live-host fixture requires Linux or macOS")
+        library = plugin / "dist" / f"{operating_system}-{architecture}" / f"cpa-cursor.{extension}"
+        environment.update({
+            "CPA_LIVE_PLUGIN_LIBRARY": str(library),
+            "CPA_LIVE_FIXTURE_DIRECTORY": str(directory),
+        })
+        overlay = directory / "live-host-overlay.json"
+        overlay.write_text(json.dumps({"Replace": {
+            str(host / "internal/pluginhost/cursor_live_native_test.go"):
+                str(root / "tests/host/live_loop_test.go.txt"),
+        }}))
+        print(f"live native fixture host={host_revision} plugin={plugin_revision}", flush=True)
+        subprocess.run(
+            ["go", "test", "-mod=readonly", "-overlay", str(overlay),
+             "./internal/pluginhost", "-run", "^TestCursorLiveNativeToolLoop$",
+             "-count=1", "-timeout", "90s", "-v"],
+            cwd=host, env=environment, check=True,
+        )
+
+
+if __name__ == "__main__":
+    main()

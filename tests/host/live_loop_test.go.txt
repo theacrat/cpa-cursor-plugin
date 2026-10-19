@@ -1,0 +1,370 @@
+package pluginhost
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	openaihandlers "github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers/openai"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"google.golang.org/protobuf/encoding/protowire"
+)
+
+type cursorNativeCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type cursorNativeUpstream struct {
+	runs, results atomic.Int32
+	mu            sync.Mutex
+	frames        chan []byte
+	requestID     string
+	sequence      uint64
+	streamEnded   chan struct{}
+	endedOnce     sync.Once
+	failures      chan error
+	wantResult    string
+}
+
+func cursorNativeBytes(field protowire.Number, value []byte) []byte {
+	return protowire.AppendBytes(protowire.AppendTag(nil, field, protowire.BytesType), value)
+}
+
+func cursorNativeString(field protowire.Number, value string) []byte {
+	return protowire.AppendString(protowire.AppendTag(nil, field, protowire.BytesType), value)
+}
+
+func cursorNativeNumber(field protowire.Number, value uint64) []byte {
+	return protowire.AppendVarint(protowire.AppendTag(nil, field, protowire.VarintType), value)
+}
+
+func cursorNativeFields(raw []byte) (map[protowire.Number][]byte, error) {
+	fields := make(map[protowire.Number][]byte)
+	for len(raw) > 0 {
+		field, kind, tagBytes := protowire.ConsumeTag(raw)
+		if tagBytes < 0 {
+			return nil, errors.New("fixture received an invalid protobuf tag")
+		}
+		raw = raw[tagBytes:]
+		if kind == protowire.BytesType {
+			value, consumed := protowire.ConsumeBytes(raw)
+			if consumed < 0 {
+				return nil, errors.New("fixture received an invalid protobuf value")
+			}
+			fields[field], raw = value, raw[consumed:]
+		} else if kind == protowire.VarintType {
+			_, consumed := protowire.ConsumeVarint(raw)
+			if consumed < 0 {
+				return nil, errors.New("fixture received an invalid protobuf number")
+			}
+			fields[field], raw = raw[:consumed], raw[consumed:]
+		} else {
+			return nil, errors.New("fixture received an unsupported protobuf wire type")
+		}
+	}
+	return fields, nil
+}
+
+func cursorNativeNested(raw []byte, fields ...protowire.Number) ([]byte, error) {
+	for _, field := range fields {
+		values, err := cursorNativeFields(raw)
+		if err != nil {
+			return nil, err
+		}
+		value, exists := values[field]
+		if !exists {
+			return nil, errors.New("fixture received an incomplete protocol message")
+		}
+		raw = value
+	}
+	return raw, nil
+}
+
+func (upstream *cursorNativeUpstream) fail(w http.ResponseWriter, err error) {
+	select {
+	case upstream.failures <- err:
+	default:
+	}
+	http.Error(w, "fixture rejected upstream request", http.StatusBadRequest)
+}
+
+func (upstream *cursorNativeUpstream) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if request.Header.Get("Authorization") != "Bearer fixture-access" {
+		upstream.fail(w, errors.New("fixture bearer credential was not preserved"))
+		return
+	}
+	switch request.URL.Path {
+	case "/aiserver.v1.AiService/GetUsableModels":
+		w.Header().Set("Content-Type", "application/proto")
+		_, _ = w.Write(cursorNativeBytes(1, cursorNativeString(1, "fixture")))
+	case "/agent.v1.AgentService/RunSSE":
+		upstream.runs.Add(1)
+		defer upstream.endedOnce.Do(func() { close(upstream.streamEnded) })
+		var header [5]byte
+		if _, err := io.ReadFull(request.Body, header[:]); err != nil {
+			upstream.fail(w, errors.New("fixture could not read initial Connect frame"))
+			return
+		}
+		size := binary.BigEndian.Uint32(header[1:])
+		if size > 1024 {
+			upstream.fail(w, errors.New("fixture initial Connect frame exceeds limit"))
+			return
+		}
+		raw := make([]byte, size)
+		if _, err := io.ReadFull(request.Body, raw); err != nil {
+			upstream.fail(w, errors.New("fixture initial Connect frame is incomplete"))
+			return
+		}
+		fields, err := cursorNativeFields(raw)
+		if err != nil {
+			upstream.fail(w, err)
+			return
+		}
+		upstream.mu.Lock()
+		upstream.requestID = string(fields[1])
+		upstream.mu.Unlock()
+		w.Header().Set("Content-Type", "application/connect+proto")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case <-request.Context().Done():
+				return
+			case frame := <-upstream.frames:
+				encoded := make([]byte, 5+len(frame))
+				binary.BigEndian.PutUint32(encoded[1:], uint32(len(frame)))
+				copy(encoded[5:], frame)
+				if _, err := w.Write(encoded); err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+			}
+		}
+	case "/aiserver.v1.BidiService/BidiAppend":
+		upstream.append(w, request)
+	default:
+		upstream.fail(w, errors.New("fixture received an unexpected upstream route"))
+	}
+}
+
+func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(request.Body, 2<<20))
+	if err != nil {
+		upstream.fail(w, errors.New("fixture could not read BidiAppend"))
+		return
+	}
+	fields, err := cursorNativeFields(raw)
+	if err != nil {
+		upstream.fail(w, err)
+		return
+	}
+	requestID, err := cursorNativeNested(fields[2], 1)
+	if err != nil {
+		upstream.fail(w, err)
+		return
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	sequence, consumed := protowire.ConsumeVarint(fields[3])
+	if consumed < 0 || sequence != upstream.sequence || string(requestID) != upstream.requestID {
+		upstream.fail(w, errors.New("fixture BidiAppend ownership or sequence changed"))
+		return
+	}
+	upstream.sequence++
+	message, err := hex.DecodeString(string(fields[1]))
+	if err != nil {
+		upstream.fail(w, errors.New("fixture append protobuf is not hexadecimal"))
+		return
+	}
+	client, err := cursorNativeFields(message)
+	if err != nil {
+		upstream.fail(w, err)
+		return
+	}
+	if _, run := client[1]; run {
+		args := append(cursorNativeString(1, "skill"), cursorNativeString(3, "upstream\ncomposite-call")...)
+		args = append(args, cursorNativeString(4, "cpa")...)
+		args = append(args, cursorNativeString(5, "mcp_cpa_skill")...)
+		entry := append(cursorNativeString(1, "id"), cursorNativeBytes(2, cursorNativeString(3, "using-agent-skills"))...)
+		args = append(args, cursorNativeBytes(2, entry)...)
+		exec := append(cursorNativeNumber(1, 7), cursorNativeString(15, "fixture-exec")...)
+		exec = append(exec, cursorNativeBytes(11, args)...)
+		upstream.frames <- cursorNativeBytes(2, exec)
+	} else if result, exists := client[2]; exists {
+		exec, err := cursorNativeFields(result)
+		if err != nil {
+			upstream.fail(w, err)
+			return
+		}
+		id, _ := protowire.ConsumeVarint(exec[1])
+		text, err := cursorNativeNested(exec[11], 1, 1, 1, 1)
+		if id != 7 || string(exec[15]) != "fixture-exec" || err != nil || string(text) != upstream.wantResult {
+			upstream.fail(w, errors.New("fixture result identity or complete skill content was lost"))
+			return
+		}
+		upstream.results.Add(1)
+		upstream.frames <- cursorNativeBytes(1, cursorNativeBytes(1, cursorNativeString(1, "continued through native host")))
+		upstream.frames <- cursorNativeBytes(1, cursorNativeBytes(14, nil))
+	} else {
+		upstream.fail(w, errors.New("fixture received an unexpected client message"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/proto")
+	w.WriteHeader(http.StatusOK)
+}
+
+func cursorNativeRequest(t *testing.T, engine http.Handler, stream bool, messages []map[string]any) ([]byte, []cursorNativeCall) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"model": "fixture", "stream": stream, "messages": messages,
+		"tools": []map[string]any{{"type": "function", "function": map[string]any{"name": "skill", "parameters": map[string]any{"type": "object"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Opencode-Session-Id", "ses_native-live-fixture")
+	request.Header.Set("X-Opencode-Session", "shared-parent-affinity")
+	request.Header.Set("X-Session-Id", "shared-parent-affinity")
+	request.Header.Set("X-Cpa-Request-Kind", "primary")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("native host returned HTTP %d", response.Code)
+	}
+	var calls []cursorNativeCall
+	decode := func(payload []byte) {
+		var body struct {
+			Choices []struct {
+				Message struct {
+					ToolCalls []cursorNativeCall `json:"tool_calls"`
+				} `json:"message"`
+				Delta struct {
+					ToolCalls []cursorNativeCall `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil {
+			t.Fatal("native host emitted malformed JSON")
+		}
+		for _, choice := range body.Choices {
+			calls = append(calls, choice.Message.ToolCalls...)
+			calls = append(calls, choice.Delta.ToolCalls...)
+		}
+	}
+	if stream {
+		scanner := bufio.NewScanner(bytes.NewReader(response.Body.Bytes()))
+		for scanner.Scan() {
+			line := strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "data:"))
+			if line != "" && line != "[DONE]" && !strings.HasPrefix(line, ":") {
+				decode([]byte(line))
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		decode(response.Body.Bytes())
+	}
+	return bytes.Clone(response.Body.Bytes()), calls
+}
+
+func TestCursorLiveNativeToolLoop(t *testing.T) {
+	library := os.Getenv("CPA_LIVE_PLUGIN_LIBRARY")
+	if library == "" || SupportPluginHeaderValue() != "1" {
+		t.Fatal("native plugin library and CGO are required")
+	}
+	gin.SetMode(gin.TestMode)
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
+			server := httptest.NewServer(upstream)
+			defer server.Close()
+			directory, err := os.MkdirTemp(os.Getenv("CPA_LIVE_FIXTURE_DIRECTORY"), "native-plugin-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(library)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pluginName := "cursor-fixture"
+			if err := os.WriteFile(filepath.Join(directory, pluginName+filepath.Ext(library)), data, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			configuration, err := config.ParseConfigBytes([]byte(fmt.Sprintf("plugins:\n  enabled: true\n  dir: %q\n  configs:\n    %s:\n      enabled: true\n      api-base-url: %q\n", directory, pluginName, server.URL)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := New()
+			defer host.ShutdownAll()
+			host.ApplyConfig(context.Background(), configuration)
+			if !host.PluginRegistered(pluginName) {
+				t.Fatal("native Cursor plugin failed registration")
+			}
+			manager := coreauth.NewManager(nil, nil, nil)
+			host.SetAuthManager(manager)
+			host.RegisterExecutors(manager, registry.GetGlobalRegistry())
+			auth := &coreauth.Auth{ID: "native-fixture-account", Provider: "cursor", Status: coreauth.StatusActive, Metadata: map[string]any{"type": "cursor", "access_token": "fixture-access"}}
+			if _, err := manager.Register(context.Background(), auth); err != nil {
+				t.Fatal(err)
+			}
+			registry.GetGlobalRegistry().RegisterClient(auth.ID, "cursor", []*registry.ModelInfo{{ID: "fixture", Object: "model", OwnedBy: "cursor"}})
+			defer registry.GetGlobalRegistry().UnregisterClient(auth.ID)
+			base := handlers.NewBaseAPIHandlers(&configuration.SDKConfig, manager)
+			base.SetPluginHost(host)
+			host.SetModelExecutor(base)
+			engine := gin.New()
+			engine.Use(func(ctx *gin.Context) { ctx.Set("userApiKey", "fixture-downstream-caller"); ctx.Next() })
+			engine.POST("/v1/chat/completions", openaihandlers.NewOpenAIAPIHandler(base).ChatCompletions)
+			messages := []map[string]any{{"role": "user", "content": "load the fixture skill"}}
+			_, calls := cursorNativeRequest(t, engine, stream, messages)
+			if len(calls) != 1 || calls[0].Function.Name != "skill" || calls[0].Function.Arguments != `{"id":"using-agent-skills"}` || strings.ContainsAny(calls[0].ID, "\r\n\t") {
+				t.Fatal("native host lost the executable skill call")
+			}
+			select {
+			case <-upstream.streamEnded:
+				t.Fatal("native host closed the retained stream after delivering tool calls")
+			default:
+			}
+			messages = append(messages, map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, map[string]any{"role": "tool", "tool_call_id": calls[0].ID, "content": upstream.wantResult})
+			response, nextCalls := cursorNativeRequest(t, engine, stream, messages)
+			if len(nextCalls) != 0 || !bytes.Contains(response, []byte("continued through native host")) {
+				t.Fatal("actual client result did not continue the native host run")
+			}
+			if upstream.runs.Load() != 1 || upstream.results.Load() != 1 {
+				t.Fatalf("native lifecycle runs=%d results=%d, want one each", upstream.runs.Load(), upstream.results.Load())
+			}
+			select {
+			case err := <-upstream.failures:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+}
