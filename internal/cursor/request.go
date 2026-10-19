@@ -191,6 +191,21 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 		seen[t.Function.Name] = true
 		names = append(names, t.Function.Name)
 	}
+	for _, message := range chat.Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if call.Function.Name == "" {
+				return nil, errors.New("invalid transcript tool call")
+			}
+			if !seen[call.Function.Name] {
+				seen[call.Function.Name] = true
+				names = append(names, call.Function.Name)
+			}
+		}
+	}
+	reserved := map[string]bool{}
 	for _, prefixed := range []bool{false, true} {
 		for _, name := range names {
 			if strings.HasPrefix(name, "mcp_"+toolProvider+"_") != prefixed {
@@ -207,7 +222,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 			for index := 2; ; index++ {
 				collision := false
 				for _, alias := range clientToolAliases(wire) {
-					collision = collision || b.resolve[alias] != ""
+					collision = collision || reserved[alias]
 				}
 				if !collision {
 					break
@@ -216,12 +231,15 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 			}
 			b.wire[name] = wire
 			for _, alias := range clientToolAliases(wire) {
-				b.resolve[alias] = name
+				reserved[alias] = true
 			}
 		}
 	}
 	if string(chat.ToolChoice) != "\"none\"" {
 		for _, t := range chat.Tools {
+			for _, alias := range clientToolAliases(b.wire[t.Function.Name]) {
+				b.resolve[alias] = t.Function.Name
+			}
 			schema := t.Function.Parameters
 			if schema == nil {
 				schema = map[string]any{"type": "object"}
@@ -356,9 +374,6 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 					encoded[key], _ = proto.Marshal(v)
 				}
 				wire := b.wire[tc.Function.Name]
-				if wire == "" {
-					wire = tc.Function.Name
-				}
 				callNames[tc.ID] = wire
 				mc := &pb.McpToolCall{Args: &pb.McpArgs{Name: wire, ToolName: wire, ProviderIdentifier: toolProvider, ToolCallId: tc.ID, Args: encoded}}
 				calls[tc.ID] = mc
