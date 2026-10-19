@@ -62,13 +62,14 @@
   repeated-history fixtures. Safe public IDs and full skill results survive.
 - Likely modules: identity helper, pending mapping, focused protocol fixtures.
 
-### purpose propagation, approval required
+### purpose propagation
 
 - Acceptance: a provider-scoped HTTP hook transmits OpenCode's existing request
   kind. Only `primary` can park. Missing or invalid purpose remains stateless.
 - Verify: primary/compaction/title/generate header tests and existing variant
   rewrite tests. Preserve all unrelated headers, bodies and provider settings.
-- Scope: provider integration repository, not yet approved for writes.
+- Scope: provider integration repository, approved and implemented on its feature
+  branch. All four kinds, stale headers, session identity and variant rewrites pass.
 
 ## L08: one live tool round trip
 

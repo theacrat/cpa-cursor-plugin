@@ -138,9 +138,9 @@ copyright and permission notice with its exact pinned source revision.
 
 ## approved scope and remaining gates
 
-The live-loop contract and host-owned lifetime extension are approved. The host
-capability and stable session identity must be proven before the implementation
-plan is finalised. Review the ordered implementation plan before coding.
+The live-loop contract, ordered plan, host-owned lifetime extension and provider
+compatibility change are approved. Host ownership and native end-to-end verification
+remain implementation gates. Deployment and live inference remain separate.
 
 Parked-resource expiry and phase-aware progress watchdogs are intentional,
 feature-specific exceptions to the upstream host's established-network timeout
