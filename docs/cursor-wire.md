@@ -40,8 +40,11 @@ filesystem, shell and subagent exec requests get typed rejection/error replies w
 the registered client alternatives and schema guidance. Unknown native operations
 get an explicit ExecClientThrow. Repeated native or unavailable client calls stop
 after eight refused replies rather than looping until the execution timeout.
-Interactive approval queries fail explicitly. No native tool
-operation is executed, and no consent or success is fabricated.
+Supported native interaction queries receive correlated typed rejections and the
+run can continue through genuine registered client tools. Search, fetch, mode
+changes, questions and planning are refused without inventing answers, consent or
+success. These replies share the same eight-refusal bound. VM setup, absent query
+types and unrecognised protocol shapes fail closed. No native operation is executed.
 
 Only caller-supplied function tools are executable. The request policy and MCP
 server instructions list their advertised names. Cursor's GetDynamicTools and

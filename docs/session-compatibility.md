@@ -58,6 +58,17 @@ restore family-wide thinking suppression, retain obsolete label qualifiers or
 remove historical alias reservations are caught by the tests. No new blocker was
 reported in the integrated review at `85901d1`.
 
+## Composer interaction follow-up
+
+The Composer 2.5 session `ses_eadc532d7ffe5EjWmJ52zZfhNz` recorded two failures
+with `Cursor interaction query requires an unsupported interactive approval flow`.
+The bridge previously aborted every interaction query without returning a result.
+Supported queries now receive typed negative replies and preserve correlation IDs,
+then allow a genuine registered MCP call. No approval, answer, plan or VM success
+is invented. Unknown shapes and VM setup remain fail-closed, and interaction
+refusals share the existing retry bound. The stored failures do not identify the
+exact query subtype, so live Composer acceptance is not claimed.
+
 ## verification boundary
 
 Local TLS HTTP/2 fixtures exercise native refusal followed by a real client-tool
@@ -65,8 +76,8 @@ call, all known aliases, namespace collisions, typed failure replies, bounded
 retries, actual user-ended summary requests and preserved HTTP 403/429.
 These fixtures do not claim a live Grok success or a repaired external quota.
 
-Deployments remain on hold. No live model request, quota override, provider switch
-or external repository modification is authorised by these fixes.
+Deployment requires explicit authorisation. No live model request, quota override,
+provider switch or external repository modification is authorised by these fixes.
 
 ## external findings
 
