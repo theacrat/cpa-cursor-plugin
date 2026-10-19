@@ -130,6 +130,14 @@ independently of the old client response. Preserve host enablement, redaction an
 upstream capture semantics. Never retain a Gin request, writer or whole context
 through `context.WithoutCancel` as a substitute for explicit capture ownership.
 
+Audit spools are independently bounded to 32 MiB per scope and 256 MiB globally,
+including space reserved for a payload-free truncation marker. Error-only logging
+does not capture response headers or body chunks. Truncation affects audit capture
+only, never client-visible tool results. Reservations remain held until spool
+cleanup is verified. Scope cancellation is immediate. Potentially blocking audit
+finalisation runs outside the scope registry lock and remains tracked against the
+24-per-plugin capacity until it completes.
+
 While parked, scoped network housekeeping does not authorise local/native tools
 or client-tool execution. Keep the plugin's protocol queue and append writer
 bounded. Apply the approved blob limits, parked capacity, one-hour abandoned-park
