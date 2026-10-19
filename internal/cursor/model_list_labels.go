@@ -42,6 +42,7 @@ func (e *Executor) modelListLabels(rows []json.RawMessage, idKey string) []model
 			decoded := json.Unmarshal(raw, &name) == nil && string(raw) != "null"
 			entry.labels[fieldIndex] = name
 			unqualified := strings.TrimSuffix(name, " ["+entry.id+"]")
+			unqualified = strings.TrimSuffix(unqualified, " ["+entry.model.ID+"]")
 			if entry.managed && (!present || decoded && familyDisplayName(unqualified, true) == entry.model.DisplayName) {
 				entry.labels[fieldIndex] = entry.model.DisplayName
 				entry.replace[fieldIndex] = true

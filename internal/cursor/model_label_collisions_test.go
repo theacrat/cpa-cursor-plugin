@@ -123,3 +123,75 @@ func TestModelListDropsDisambiguatorsAfterDuplicateDisappears(t *testing.T) {
 		t.Fatalf("obsolete duplicate qualifiers retained: %v", root.Data[0])
 	}
 }
+
+func TestModelListDropsDiscoveryQualifiersAfterDuplicateDisappears(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix, first, second, qualified string
+		index                                  int
+	}{
+		{name: "model ID", first: "alpha", second: "beta", qualified: "Model [alpha]"},
+		{name: "account prefix", prefix: "work", first: "alpha", second: "beta", qualified: "Model [alpha]"},
+		{name: "effort suffix", first: "high", second: "low", qualified: "Model [high]"},
+		{name: "upstream namespace", first: "vendor/high", second: "other/high", qualified: "Model [other/high]", index: 1},
+	} {
+		for _, schema := range []struct{ list, id string }{{"data", "id"}, {"models", "slug"}} {
+			t.Run(tc.name+"/"+schema.list, func(t *testing.T) {
+				e := NewExecutor(DefaultConfig())
+				defer e.Close()
+				models := discoverMetadata(t, e, "account", tc.prefix, []*pb.ModelDetails{{ModelId: tc.first, DisplayName: "Model"}, {ModelId: tc.second, DisplayName: "Model"}}, nil)
+				model := models[tc.index]
+				if model.DisplayName != tc.qualified {
+					t.Fatalf("discovery label=%q want=%q", model.DisplayName, tc.qualified)
+				}
+				id := first(tc.prefix, "cursor") + "/" + model.ID
+				body, err := json.Marshal(map[string]any{schema.list: []map[string]string{{schema.id: id, "owned_by": "cursor", "name": model.DisplayName, "display_name": model.DisplayName}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: body})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string][]map[string]any
+				if err := json.Unmarshal(response.Body, &root); err != nil {
+					t.Fatal(err)
+				}
+				row := root[schema.list][0]
+				if row["name"] != "Model" || row["display_name"] != "Model" || row[schema.id] != id {
+					t.Fatalf("discovery qualifiers retained or route changed: %v", row)
+				}
+				if repeated, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: response.Body}); err != nil || len(repeated.Body) != 0 {
+					t.Fatalf("discovery label cleanup is not idempotent: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestModelListPreservesCustomDiscoveryLikeSuffixes(t *testing.T) {
+	for _, schema := range []struct{ list, id string }{{"data", "id"}, {"models", "slug"}} {
+		for _, label := range []string{"Model [personal]", "Model [beta]", "Personal [alpha]", "Model [other/alpha]", "Model [alpha] [personal]"} {
+			t.Run(schema.list+"/"+label, func(t *testing.T) {
+				e := NewExecutor(DefaultConfig())
+				defer e.Close()
+				discoverMetadata(t, e, "account", "work", []*pb.ModelDetails{{ModelId: "alpha", DisplayName: "Model"}, {ModelId: "beta", DisplayName: "Model"}}, nil)
+				body, err := json.Marshal(map[string]any{schema.list: []map[string]string{{schema.id: "work/alpha", "owned_by": "cursor", "name": label, "display_name": label}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: body})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string][]map[string]any
+				if err := json.Unmarshal(response.Body, &root); err != nil {
+					t.Fatal(err)
+				}
+				row := root[schema.list][0]
+				if row["name"] != label || row["display_name"] != label {
+					t.Fatalf("custom suffix changed: %v", row)
+				}
+			})
+		}
+	}
+}
