@@ -27,6 +27,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("host", type=Path)
     parser.add_argument("--plugin", type=Path)
+    parser.add_argument("--expect-stateless", action="store_true")
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     host_source = arguments.host.resolve(strict=True)
@@ -60,6 +61,7 @@ def main() -> None:
         environment.update({
             "CPA_LIVE_PLUGIN_LIBRARY": str(library),
             "CPA_LIVE_FIXTURE_DIRECTORY": str(directory),
+            "CPA_LIVE_EXPECT_STATELESS": "1" if arguments.expect_stateless else "0",
         })
         overlay = directory / "live-host-overlay.json"
         overlay.write_text(json.dumps({"Replace": {

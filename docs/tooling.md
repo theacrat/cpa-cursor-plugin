@@ -63,3 +63,6 @@ streaming requests must retain exactly one upstream Run, return a real tool resu
 to its execution identity and preserve complete skill content. The only network
 traffic is the fixture's randomly allocated loopback server. Dependency downloads
 are disabled and disposable source/build copies are removed after the run.
+Add `--expect-stateless` when verifying the unmodified host baseline. Both primary
+response modes must then close their upstream run normally without probing any
+retained callback.

@@ -387,7 +387,7 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 			if len(calls) != 1 || calls[0].Function.Name != "skill" || calls[0].Function.Arguments != `{"id":"using-agent-skills"}` || strings.ContainsAny(calls[0].ID, "\r\n\t") {
 				t.Fatal("native host lost the executable skill call")
 			}
-			if test.stateless {
+			if test.stateless || os.Getenv("CPA_LIVE_EXPECT_STATELESS") == "1" {
 				select {
 				case <-upstream.streamEnded:
 				case <-time.After(5 * time.Second):
