@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("host", type=Path)
     parser.add_argument("--plugin", type=Path)
     parser.add_argument("--expect-stateless", action="store_true")
-    parser.add_argument("--race", action="store_true")
+    parser.add_argument("--race", action="store_true", help="instrument the host fixture, not the separately loaded Go runtime")
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     host_source = arguments.host.resolve(strict=True)
@@ -58,14 +58,7 @@ def main() -> None:
         if extension is None:
             raise SystemExit("native live-host fixture requires Linux or macOS")
         library = plugin / "dist" / f"{operating_system}-{architecture}" / f"cpa-cursor.{extension}"
-        if arguments.race:
-            library.parent.mkdir(parents=True)
-            subprocess.run(
-                ["go", "build", "-race", "-trimpath", "-buildmode=c-shared", "-o", str(library), "./cmd/cpa-cursor"],
-                cwd=plugin, env=environment, check=True,
-            )
-        else:
-            subprocess.run(["bash", "scripts/build.sh"], cwd=plugin, env=environment, check=True)
+        subprocess.run(["bash", "scripts/build.sh"], cwd=plugin, env=environment, check=True)
         environment.update({
             "CPA_LIVE_PLUGIN_LIBRARY": str(library),
             "CPA_LIVE_FIXTURE_DIRECTORY": str(directory),

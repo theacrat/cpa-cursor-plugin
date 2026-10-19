@@ -66,5 +66,8 @@ are disabled and disposable source/build copies are removed after the run.
 Add `--expect-stateless` when verifying the unmodified host baseline. Both primary
 response modes must then close their upstream run normally without probing any
 retained callback.
-Add `--race` to instrument both the native library and its host fixture with Go's
-race detector.
+Add `--race` to instrument the host fixture with Go's race detector. The native
+library remains a normal shared build. Loading separately race-instrumented Go
+runtimes together failed during ThreadSanitizer allocation on the verification
+machine, before the fixture could run. Plugin concurrency is checked separately
+by `mise run check`, not claimed as cross-runtime race coverage.
