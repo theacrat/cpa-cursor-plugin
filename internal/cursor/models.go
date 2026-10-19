@@ -98,7 +98,7 @@ func (e *Executor) ModelsForAuth(ctx context.Context, req pluginapi.AuthModelReq
 	for i := range models {
 		if levels := advertisedLevels(tables[models[i].ID]); len(levels) > 0 || tables[models[i].ID].hasThinking {
 			group := tables[models[i].ID]
-			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: group.hasBare && group.ids["thinking"] != "" && !group.hasThinking}
+			models[i].Thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: group.hasBare && group.ids["thinking"] != "" && !group.defaultThinking}
 			if len(levels) > 0 {
 				models[i].SupportedParameters = append(models[i].SupportedParameters, "reasoning_effort")
 			}

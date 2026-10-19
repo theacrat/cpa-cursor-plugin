@@ -41,12 +41,13 @@ const defaultKind = "default"
 
 // variantGroup is one model family and its known upstream variant IDs.
 type variantGroup struct {
-	base        string
-	display     string
-	ids         map[string]string
-	rank        map[string]int
-	hasBare     bool
-	hasThinking bool
+	base            string
+	display         string
+	ids             map[string]string
+	rank            map[string]int
+	hasBare         bool
+	hasThinking     bool
+	defaultThinking bool
 }
 
 // variantTable maps family base IDs to their upstream variants.
@@ -60,10 +61,11 @@ type variantCacheEntry struct {
 }
 
 type variantFetch struct {
-	done  chan struct{}
-	table *variantTable
-	took  time.Duration
-	err   error
+	done           chan struct{}
+	table          *variantTable
+	took           time.Duration
+	err            error
+	ownerCancelled bool
 }
 
 func analyseVariant(id string) (base, kind string, rank int, bare bool) {
@@ -125,6 +127,9 @@ func groupVariants(rows []*pb.ModelDetails) []*variantGroup {
 		if _, ok := group.ids[kind]; !ok || rank < group.rank[kind] {
 			group.ids[kind] = row.ModelId
 			group.rank[kind] = rank
+			if kind == defaultKind {
+				group.defaultThinking = row.ThinkingDetails != nil
+			}
 		}
 		if bare {
 			group.hasBare = true
@@ -372,9 +377,6 @@ func variantCacheKey(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// variantTableFor returns the cached variant table for a credential,
-// fetching it over host HTTP on a miss. A failed fetch is an error: the
-// executor must not guess upstream variant IDs.
 func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRequest) (*variantTable, time.Duration, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -384,29 +386,39 @@ func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRe
 		return nil, 0, err
 	}
 	key := variantCacheKey(token)
-	e.variantMu.Lock()
-	if entry, ok := e.variants[key]; ok && time.Now().Before(entry.expires) {
-		e.variantMu.Unlock()
-		return entry.table, 0, nil
-	}
-	if pending, ok := e.variantFetches[key]; ok {
-		e.variantMu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		case <-pending.done:
-			if err := ctx.Err(); err != nil {
-				return nil, 0, err
-			}
-			return pending.table, pending.took, pending.err
+	var pending *variantFetch
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
 		}
+		e.variantMu.Lock()
+		if entry, ok := e.variants[key]; ok && time.Now().Before(entry.expires) {
+			e.variantMu.Unlock()
+			return entry.table, 0, nil
+		}
+		if current, ok := e.variantFetches[key]; ok {
+			e.variantMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, 0, ctx.Err()
+			case <-current.done:
+				if err := ctx.Err(); err != nil {
+					return nil, 0, err
+				}
+				if current.ownerCancelled {
+					continue
+				}
+				return current.table, current.took, current.err
+			}
+		}
+		if e.variantFetches == nil {
+			e.variantFetches = make(map[string]*variantFetch)
+		}
+		pending = &variantFetch{done: make(chan struct{})}
+		e.variantFetches[key] = pending
+		e.variantMu.Unlock()
+		break
 	}
-	if e.variantFetches == nil {
-		e.variantFetches = make(map[string]*variantFetch)
-	}
-	pending := &variantFetch{done: make(chan struct{})}
-	e.variantFetches[key] = pending
-	e.variantMu.Unlock()
 	fetchStart := time.Now()
 	rows, err := e.fetchVariantRows(ctx, req)
 	fetchTook := time.Since(fetchStart)
@@ -424,6 +436,7 @@ func (e *Executor) variantTableFor(ctx context.Context, req pluginapi.ExecutorRe
 		e.cacheVariantsLocked(key, table)
 	}
 	pending.table, pending.took, pending.err = table, fetchTook, err
+	pending.ownerCancelled = err != nil && ctx.Err() != nil
 	delete(e.variantFetches, key)
 	close(pending.done)
 	e.variantMu.Unlock()

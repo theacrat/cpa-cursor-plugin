@@ -124,3 +124,93 @@ func TestVariantFetchFailureCanRetryAndExpiredEntriesAreRemoved(t *testing.T) {
 		t.Fatal("expired credential catalogue retained")
 	}
 }
+
+func TestSharedDiscoverySurvivesOwnerCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			e := NewExecutor(DefaultConfig())
+			defer e.Close()
+			var calls atomic.Int32
+			req := testRequest()
+			req.HTTPClient = fixtureHost{do: func(ctx context.Context, _ pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				if calls.Add(1) == 1 {
+					<-ctx.Done()
+					return pluginapi.HTTPResponse{}, ctx.Err()
+				}
+				raw, _ := proto.Marshal(&pb.GetUsableModelsResponse{Models: variantRows("fixture")})
+				return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: raw}, nil
+			}}
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+			} else {
+				ctx, cancel = context.WithCancel(context.Background())
+			}
+			defer cancel()
+			owner := make(chan error, 1)
+			go func() {
+				_, _, err := e.variantTableFor(ctx, req)
+				owner <- err
+			}()
+			synctest.Wait()
+			type result struct {
+				table *variantTable
+				err   error
+			}
+			waiters := make(chan result, 2)
+			for range 2 {
+				go func() {
+					table, _, err := e.variantTableFor(context.Background(), req)
+					waiters <- result{table: table, err: err}
+				}()
+			}
+			synctest.Wait()
+			want := context.Canceled
+			if deadline {
+				want = context.DeadlineExceeded
+				time.Sleep(time.Second)
+			} else {
+				cancel()
+			}
+			synctest.Wait()
+			if err := <-owner; !errors.Is(err, want) {
+				t.Errorf("owner error=%v want=%v", err, want)
+			}
+			first, second := <-waiters, <-waiters
+			if first.err != nil || second.err != nil || first.table == nil || first.table != second.table || first.table.byBase["fixture"] == nil || calls.Load() != 2 {
+				t.Fatalf("live waiters lost discovery: first=%+v second=%+v calls=%d", first, second, calls.Load())
+			}
+		})
+	}
+}
+
+func TestSharedDiscoveryTimeoutDoesNotRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := NewExecutor(Config{Enabled: true, RequestTimeout: 1})
+		defer e.Close()
+		var calls atomic.Int32
+		req := testRequest()
+		req.HTTPClient = fixtureHost{do: func(ctx context.Context, _ pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+			calls.Add(1)
+			<-ctx.Done()
+			return pluginapi.HTTPResponse{}, ctx.Err()
+		}}
+		results := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, _, err := e.variantTableFor(context.Background(), req)
+				results <- err
+			}()
+			synctest.Wait()
+		}
+		for range 2 {
+			if err := <-results; !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("discovery deadline changed: %v", err)
+			}
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("shared discovery timeout retried %d times", calls.Load())
+		}
+	})
+}

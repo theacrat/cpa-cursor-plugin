@@ -172,3 +172,30 @@ func TestDefaultEffortDoesNotAdvertiseDisabledReasoning(t *testing.T) {
 		t.Fatal("default effort was advertised as disabled thinking")
 	}
 }
+
+func TestThinkingVariantMarkerPreservesBareToggle(t *testing.T) {
+	for _, bareThinking := range []bool{false, true} {
+		for _, reversed := range []bool{false, true} {
+			e := NewExecutor(DefaultConfig())
+			rows := variantRows("model", "model-thinking")
+			rows[1].ThinkingDetails = &pb.ThinkingDetails{}
+			if bareThinking {
+				rows[0].ThinkingDetails = &pb.ThinkingDetails{}
+			}
+			if reversed {
+				rows[0], rows[1] = rows[1], rows[0]
+			}
+			models := discoverMetadata(t, e, "account", "", rows, nil)
+			e.Close()
+			if len(models) != 1 || models[0].Thinking == nil || models[0].Thinking.ZeroAllowed != !bareThinking || !reflect.DeepEqual(models[0].Thinking.Levels, []string{"high"}) {
+				t.Fatalf("bare thinking=%v reversed=%v lost toggle: %+v", bareThinking, reversed, models)
+			}
+			group := groupVariants(rows)[0]
+			for effort, want := range map[string]string{"none": "model", "high": "model-thinking"} {
+				if got, err := resolveVariant(group, effort); err != nil || got != want {
+					t.Fatalf("effort %s routed to %s instead of %s: %v", effort, got, want, err)
+				}
+			}
+		}
+	}
+}

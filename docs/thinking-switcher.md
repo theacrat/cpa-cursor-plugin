@@ -28,6 +28,8 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   `none` variants fold into the tier's default kind.
   Only discovered effort kinds are advertised, with a thinking-only variant
   represented by the host-supported `high` level rather than an invented effort list.
+  Disabling thinking is advertised only for a distinct unmarked bare route paired
+  with a thinking variant. A marker on the thinking variant does not hide that toggle.
 - The executor resolves the variant per request and sends that variant ID
   upstream as `RequestedModel.ModelId`. Effort precedence: `(suffix)` in the
   requested model, then `reasoning_effort` in the chat payload, then the
@@ -46,6 +48,9 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
 - The variant table is cached per credential (5 minute TTL) and shared
   between discovery and execution. A cold executor fetches it over host HTTP;
   if that fetch fails the request fails instead of guessing a variant ID.
+  Live waiters retry discovery using their own request when the fetch owner is
+  cancelled. An upstream failure or shared discovery timeout is still returned,
+  not silently retried.
 - Legacy suffixed IDs (`claude-opus-4-8-high`) are no longer registered, so
   saved configs must switch to the base ID with an optional `(level)` suffix.
   This is an intentional breaking change for a usable list.

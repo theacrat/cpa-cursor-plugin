@@ -30,5 +30,6 @@ Review the complete diff, then run `mise run check` and `mise run test-host` wit
 concurrent source edits.
 
 Do not connect to the deployment host, use live credentials, upload artefacts or
-restart services. Launch read-only review agents in the background, with no nested
-delegation or writes to the shared checkout.
+restart services. Launch review agents in the background, with no nested
+delegation. Keep reviewers read-only and isolate delegated fixes in separate
+branches under `.worktrees/`.
