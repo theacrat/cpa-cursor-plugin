@@ -210,10 +210,7 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 					}
 				}
 				rawArgs, _ := json.Marshal(decoded)
-				id := args.ToolCallId
-				if id == "" {
-					id = "call_" + uuid()
-				}
+				id := clientToolCallID(args.ToolCallId)
 				if !seen[id] {
 					r.calls = append(r.calls, toolCall{ID: id, Type: "function", Function: functionCall{Name: name, Arguments: string(rawArgs)}})
 					seen[id] = true
