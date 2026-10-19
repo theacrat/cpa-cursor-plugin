@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -239,6 +240,11 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 
 func cursorNativeRequest(t *testing.T, engine http.Handler, stream bool, messages []map[string]any) ([]byte, []cursorNativeCall) {
 	t.Helper()
+	return cursorNativeRequestWithHeaders(t, engine, stream, messages, nil)
+}
+
+func cursorNativeRequestWithHeaders(t *testing.T, engine http.Handler, stream bool, messages []map[string]any, headers http.Header) ([]byte, []cursorNativeCall) {
+	t.Helper()
 	payload, err := json.Marshal(map[string]any{
 		"model": "fixture", "stream": stream, "messages": messages,
 		"tools": []map[string]any{{"type": "function", "function": map[string]any{"name": "skill", "parameters": map[string]any{"type": "object"}}}},
@@ -252,6 +258,9 @@ func cursorNativeRequest(t *testing.T, engine http.Handler, stream bool, message
 	request.Header.Set("X-Opencode-Session", "shared-parent-affinity")
 	request.Header.Set("X-Session-Id", "shared-parent-affinity")
 	request.Header.Set("X-Cpa-Request-Kind", "primary")
+	for key, values := range headers {
+		request.Header[key] = values
+	}
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -300,8 +309,21 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 		t.Fatal("native plugin library and CGO are required")
 	}
 	gin.SetMode(gin.TestMode)
-	for _, stream := range []bool{false, true} {
-		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stream    bool
+		headers   http.Header
+		stateless bool
+	}{
+		{name: "buffered"},
+		{name: "streaming", stream: true},
+		{name: "missing purpose", headers: http.Header{"X-Cpa-Request-Kind": nil}, stateless: true},
+		{name: "title", headers: http.Header{"X-Cpa-Request-Kind": {"title"}}, stateless: true},
+		{name: "compaction", headers: http.Header{"X-Cpa-Request-Kind": {"compaction"}}, stateless: true},
+		{name: "generate", headers: http.Header{"X-Cpa-Request-Kind": {"generate"}}, stateless: true},
+		{name: "missing session", headers: http.Header{"X-Opencode-Session-Id": nil}, stateless: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
 			server := httptest.NewServer(upstream)
 			defer server.Close()
@@ -343,9 +365,20 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 			engine.Use(func(ctx *gin.Context) { ctx.Set("userApiKey", "fixture-downstream-caller"); ctx.Next() })
 			engine.POST("/v1/chat/completions", openaihandlers.NewOpenAIAPIHandler(base).ChatCompletions)
 			messages := []map[string]any{{"role": "user", "content": "load the fixture skill"}}
-			_, calls := cursorNativeRequest(t, engine, stream, messages)
+			_, calls := cursorNativeRequestWithHeaders(t, engine, test.stream, messages, test.headers)
 			if len(calls) != 1 || calls[0].Function.Name != "skill" || calls[0].Function.Arguments != `{"id":"using-agent-skills"}` || strings.ContainsAny(calls[0].ID, "\r\n\t") {
 				t.Fatal("native host lost the executable skill call")
+			}
+			if test.stateless {
+				select {
+				case <-upstream.streamEnded:
+				case <-time.After(5 * time.Second):
+					t.Fatal("ineligible native request retained upstream work")
+				}
+				if upstream.runs.Load() != 1 || upstream.results.Load() != 0 {
+					t.Fatal("stateless fallback changed tool ownership")
+				}
+				return
 			}
 			select {
 			case <-upstream.streamEnded:
@@ -353,7 +386,7 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 			default:
 			}
 			messages = append(messages, map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, map[string]any{"role": "tool", "tool_call_id": calls[0].ID, "content": upstream.wantResult})
-			response, nextCalls := cursorNativeRequest(t, engine, stream, messages)
+			response, nextCalls := cursorNativeRequest(t, engine, test.stream, messages)
 			if len(nextCalls) != 0 || !bytes.Contains(response, []byte("continued through native host")) {
 				t.Fatal("actual client result did not continue the native host run")
 			}
