@@ -30,9 +30,11 @@ func clientToolPolicy(tools []*pb.McpToolDefinition) string {
 }
 
 func clientRequestContext(tools []*pb.McpToolDefinition) *pb.RequestContext {
+	policy := clientToolPolicy(tools)
 	return &pb.RequestContext{
-		Env: &pb.RequestContextEnv{}, Tools: tools,
-		McpInstructions:      []*pb.McpInstructions{{ServerName: toolProvider, Instructions: clientToolPolicy(tools)}},
+		Rules: []*pb.CursorRule{{FullPath: ".cursorrules", Content: policy, Type: &pb.CursorRuleType{Type: &pb.CursorRuleType_Global{Global: &pb.CursorRuleTypeGlobal{}}}}},
+		Env:   &pb.RequestContextEnv{}, Tools: tools,
+		McpInstructions:      []*pb.McpInstructions{{ServerName: toolProvider, Instructions: policy}},
 		WebSearchEnabled:     proto.Bool(false),
 		McpFileSystemOptions: &pb.McpFileSystemOptions{Enabled: false},
 		SkillOptions:         &pb.SkillOptions{},

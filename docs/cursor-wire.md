@@ -55,6 +55,11 @@ disable optional native web search. Cursor may still show upstream-native tools
 that cannot be hidden by this protocol, so a native refusal explicitly distinguishes
 that limitation from the availability of client tools.
 
+The same executable-client policy is delivered in root rules, MCP instructions
+and the native RequestContext global-rule field, including requested context
+refreshes. Native global rules are protocol data, not a file written on the host.
+They do not enable filesystem access, native tools or interactive approvals.
+
 Frames and decompressed messages are limited to 16 MiB, blob stores to 64 MiB
 and 8192 entries. Missing blobs fail rather than silently erase history.
 Active inference and discovery calls share bounded concurrency and deadlines;
