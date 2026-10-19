@@ -44,8 +44,10 @@
 
 ## checkpoint A
 
-- [ ] Independent host ownership review is clean.
+- [x] Independent host ownership, delivery and production logging review is clean.
 - [ ] Full host tests, race checks and production build pass at a fixed HEAD.
+  Retained-feature races and both Linux builds pass. The broader suite remains
+  red in baseline-reproduced tests, with exact results in the verification record.
 
 ## L06: plugin retained-host adapter
 
@@ -83,8 +85,8 @@
 ## L08: one live tool round trip
 
 - [x] Local protocol fixtures prove the same upstream Run across multiple rounds.
-- [x] Real native host fixture passed buffered and streaming round trips at the
-  initial host checkpoint. Repeat after host review fixes before final handoff.
+- [x] Real native host fixture passes buffered, streaming and batched multi-round
+  continuation after the host review fixes, with host-side race instrumentation.
 
 - Acceptance: client receives a tool call while upstream remains alive, then the
   next client request sends the actual result to that same upstream execution.
@@ -135,11 +137,15 @@
 
 - [x] Actual native plugin retains stateless execution on the unmodified v8.0.29 host.
 - [x] Provider purpose propagation is independently reviewed and fully checked.
-- [ ] Integrate and independently review host flush, logging and nested-binding fixes.
+- [x] Integrate and independently review host flush, logging and nested-binding fixes.
 
-- [ ] Old-host fallback and new-host multi-round/batched loops pass end to end.
-- [ ] Reference-visible semantics and intentional safety differences documented.
-- [ ] Independent review/fix loop is clean at fixed host/plugin HEADs.
+- [x] Old-host fallback and new-host multi-round/batched loops pass end to end.
+- [x] Reference-visible semantics and intentional safety differences documented.
+- [x] Independent feature review/fix loop is clean at fixed host/plugin HEADs.
 - [ ] Full host tests/build and plugin check, host fixtures, native ABI and Linux
   AMD64/ARM64 builds pass. Unavailable platform runtime checks are disclosed.
-- [ ] No deployment, live inference or service changes without a separate request.
+- [x] No deployment, live inference or service changes without a separate request.
+
+Final gates and platform limitations are recorded in
+`docs/live-tool-loop-verification.md`. The broad host test gate stays unchecked,
+rather than hiding baseline failures or claiming an entirely green host suite.

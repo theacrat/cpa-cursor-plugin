@@ -138,6 +138,12 @@ cleanup is verified. Scope cancellation is immediate. Potentially blocking audit
 finalisation runs outside the scope registry lock and remains tracked against the
 24-per-plugin capacity until it completes.
 
+Lifecycle cancellation is passed through production log finalisation and Home
+submission. It closes only the operation-owned audit connection, not the shared
+Home client. Local copies check cancellation before and between writes. A blocked
+filesystem syscall cannot be forcibly interrupted and remains owned until it
+returns, without an abandoned I/O goroutine.
+
 While parked, scoped network housekeeping does not authorise local/native tools
 or client-tool execution. Keep the plugin's protocol queue and append writer
 bounded. Apply the approved blob limits, parked capacity, one-hour abandoned-park

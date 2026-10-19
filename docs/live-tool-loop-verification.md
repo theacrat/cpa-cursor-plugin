@@ -13,7 +13,7 @@ Production remains on Cursor plugin revision
 ## verified behaviour
 
 Last native integration: host `04d02ccaeaf2f72523ec53e50b30a6c55a3032c7`,
-plugin `03bb3c8b0833fe57c7723477546e16160d8b210e`, provider hook
+plugin `576be9639059f7ec85366e7ad7a53dc9cb27ef82`, provider hook
 `3c3c486f13c092d8b05c21e31a92c638492acb61`.
 
 - Retain one upstream Run through multiple client-owned tool rounds.
@@ -123,9 +123,15 @@ macOS builds and runtime checks require its SDK and were not performed locally.
 Real Cursor behaviour and the complete installed OpenCode chain remain unverified
 without separately authorised live inference.
 
-## remaining final gate
+## handoff status
 
-The production audit finaliser's lifecycle-cancellation fix is integrated and its
-checks pass. Independent review of that last patch remains pending. The broad
-host suite is not green, so this is not a deployment-ready or live-compatibility
-claim.
+The production audit finaliser's lifecycle-cancellation fix is integrated,
+independently reviewed and verified. A separate memory-only registry integration
+check confirmed that cancelling its drain reaches a real retained capture and
+releases the closing slot, spool files and byte reservations exactly once.
+
+The feature review is clean. The broad host suite is not green, so this is not a
+deployment-ready or live-compatibility claim. Changes remain on the local
+`feat/live-tool-loop`, `feat/retained-http` and `feat/request-purpose` branches.
+The source checkouts are retained for handoff. Merged auxiliary worktrees and
+disposable verification copies are removed.
