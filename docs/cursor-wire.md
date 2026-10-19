@@ -60,6 +60,15 @@ and the native RequestContext global-rule field, including requested context
 refreshes. Native global rules are protocol data, not a file written on the host.
 They do not enable filesystem access, native tools or interactive approvals.
 
+With the existing host debug logger enabled, rejected calls produce bounded
+`cursor_tool_rejected` JSON events. A locally generated run ID links at most eight
+refused replies and one terminal event. Fields classify the compiled protocol
+subtype, provider as empty/cpa/foreign, name resolution and argument shape.
+Unknown protocol fields collapse to an unknown category, except the verified
+field-9 fetch case. Names, arbitrary argument keys, values, upstream IDs, prompts,
+skill text, paths and URLs are excluded. Diagnostics do not alter dispatch,
+unwrap dynamic payloads or retry tools.
+
 Frames and decompressed messages are limited to 16 MiB, blob stores to 64 MiB
 and 8192 entries. Missing blobs fail rather than silently erase history.
 Active inference and discovery calls share bounded concurrency and deadlines;
