@@ -47,6 +47,8 @@ type cursorNativeUpstream struct {
 	sequence      uint64
 	streamEnded   chan struct{}
 	endedOnce     sync.Once
+	closed        chan struct{}
+	closeOnce     sync.Once
 	failures      chan error
 	wantResult    string
 }
@@ -113,6 +115,10 @@ func (upstream *cursorNativeUpstream) fail(w http.ResponseWriter, err error) {
 	http.Error(w, "fixture rejected upstream request", http.StatusBadRequest)
 }
 
+func (upstream *cursorNativeUpstream) stop() {
+	upstream.closeOnce.Do(func() { close(upstream.closed) })
+}
+
 func (upstream *cursorNativeUpstream) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if request.Header.Get("Authorization") != "Bearer fixture-access" {
 		upstream.fail(w, errors.New("fixture bearer credential was not preserved"))
@@ -153,6 +159,8 @@ func (upstream *cursorNativeUpstream) ServeHTTP(w http.ResponseWriter, request *
 		w.(http.Flusher).Flush()
 		for {
 			select {
+			case <-upstream.closed:
+				return
 			case <-request.Context().Done():
 				return
 			case frame := <-upstream.frames:
@@ -214,7 +222,11 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 		args = append(args, cursorNativeBytes(2, entry)...)
 		exec := append(cursorNativeNumber(1, 7), cursorNativeString(15, "fixture-exec")...)
 		exec = append(exec, cursorNativeBytes(11, args)...)
-		upstream.frames <- cursorNativeBytes(2, exec)
+		select {
+		case upstream.frames <- cursorNativeBytes(2, exec):
+		case <-upstream.closed:
+		case <-request.Context().Done():
+		}
 	} else if result, exists := client[2]; exists {
 		exec, err := cursorNativeFields(result)
 		if err != nil {
@@ -228,8 +240,13 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 			return
 		}
 		upstream.results.Add(1)
-		upstream.frames <- cursorNativeBytes(1, cursorNativeBytes(1, cursorNativeString(1, "continued through native host")))
-		upstream.frames <- cursorNativeBytes(1, cursorNativeBytes(14, nil))
+		for _, frame := range [][]byte{cursorNativeBytes(1, cursorNativeBytes(1, cursorNativeString(1, "continued through native host"))), cursorNativeBytes(1, cursorNativeBytes(14, nil))} {
+			select {
+			case upstream.frames <- frame:
+			case <-upstream.closed:
+			case <-request.Context().Done():
+			}
+		}
 	} else {
 		upstream.fail(w, errors.New("fixture received an unexpected client message"))
 		return
@@ -324,9 +341,10 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 		{name: "missing session", headers: http.Header{"X-Opencode-Session-Id": nil}, stateless: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
+			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), closed: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
 			server := httptest.NewServer(upstream)
 			defer server.Close()
+			defer upstream.stop()
 			directory, err := os.MkdirTemp(os.Getenv("CPA_LIVE_FIXTURE_DIRECTORY"), "native-plugin-")
 			if err != nil {
 				t.Fatal(err)
