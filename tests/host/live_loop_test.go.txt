@@ -39,6 +39,13 @@ type cursorNativeCall struct {
 	} `json:"function"`
 }
 
+type cursorNativeRecorder struct{ *httptest.ResponseRecorder }
+
+func (recorder *cursorNativeRecorder) FlushError() error {
+	recorder.Flush()
+	return nil
+}
+
 type cursorNativeUpstream struct {
 	runs, results atomic.Int32
 	mu            sync.Mutex
@@ -278,7 +285,7 @@ func cursorNativeRequestWithHeaders(t *testing.T, engine http.Handler, stream bo
 	for key, values := range headers {
 		request.Header[key] = values
 	}
-	response := httptest.NewRecorder()
+	response := &cursorNativeRecorder{httptest.NewRecorder()}
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("native host returned HTTP %d", response.Code)
