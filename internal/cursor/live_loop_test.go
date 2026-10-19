@@ -26,6 +26,7 @@ type liveFixtureScope struct {
 	batch                          int
 	lastResult                     *pb.McpResult
 	afterFirst                     bool
+	duplicateExec                  bool
 }
 
 func (h *liveFixtureHost) SupportsRetainedHTTP() bool                           { return true }
@@ -85,7 +86,11 @@ func (s *liveFixtureScope) Do(_ context.Context, req pluginapi.HTTPRequest) (plu
 			count = 1
 		}
 		for index := 0; index < count; index++ {
-			frame, _ := frameMessage(&pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: uint32(7 + index), ExecId: "upstream-exec", Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ProviderIdentifier: "cpa", ToolCallId: fmt.Sprintf("upstream\ncall%d", index)}}}}})
+			execID := uint32(7 + index)
+			if s.duplicateExec {
+				execID = 7
+			}
+			frame, _ := frameMessage(&pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: execID, ExecId: "upstream-exec", Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ProviderIdentifier: "cpa", ToolCallId: fmt.Sprintf("upstream\ncall%d", index)}}}}})
 			s.chunks <- pluginapi.HTTPStreamChunk{Payload: frame}
 		}
 	} else if result := m.GetExecClientMessage(); result != nil && result.GetMcpResult() != nil {
@@ -279,5 +284,16 @@ func TestLiveToolLoopStreamingRetainsResultOwnership(t *testing.T) {
 	defer scope.mu.Unlock()
 	if scope.parks != 1 || scope.closed {
 		t.Fatal("normal streamed tool response cancelled the retained run")
+	}
+}
+
+func TestLiveToolLoopRejectsDuplicateExecutionIdentity(t *testing.T) {
+	scope := &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8), batch: 2, duplicateExec: true}
+	e := NewExecutor(DefaultConfig())
+	warmFixtureVariants(e)
+	defer e.Close()
+	response, err := e.Execute(context.Background(), liveRequest(&liveFixtureHost{scope: scope}))
+	if err == nil || !strings.Contains(err.Error(), "execution identity") || len(response.Payload) > 0 {
+		t.Fatal("duplicate execution identity escaped as client calls")
 	}
 }

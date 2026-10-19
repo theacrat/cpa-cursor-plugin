@@ -24,6 +24,18 @@ type livePending struct {
 	call toolCall
 	exec *pb.ExecServerMessage
 }
+
+type liveRetry struct {
+	delay   time.Duration
+	message string
+}
+
+func (e *liveRetry) Error() string { return e.message }
+
+func recoverableLiveTransport(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "Cursor host stream closed" || err.Error() == "Cursor RunSSE stream failed"
+}
+
 type liveSession struct {
 	mu                sync.Mutex
 	owner, compatible string
@@ -43,8 +55,9 @@ type liveSession struct {
 	closed            bool
 	closeOnce         sync.Once
 	expiry            *time.Timer
-	checkpoint        *pb.ConversationStateStructure
 	dead              atomic.Bool
+	terminalMu        sync.Mutex
+	terminalErr       error
 	retainedBytes     atomic.Int64
 	generation        atomic.Uint64
 }
@@ -166,13 +179,18 @@ func (s *liveSession) read() {
 		if update := message.GetInteractionUpdate(); err == nil && update != nil && update.GetHeartbeat() != nil {
 			continue
 		}
+		if err != nil {
+			s.terminalMu.Lock()
+			s.terminalErr = err
+			s.terminalMu.Unlock()
+			s.dead.Store(true)
+		}
 		select {
 		case s.frames <- liveFrame{message: message, err: err}:
 		case <-s.ctx.Done():
 			return
 		}
 		if err != nil {
-			s.dead.Store(true)
 			return
 		}
 	}
@@ -188,7 +206,71 @@ func (e *Executor) retireLive(s *liveSession) {
 	s.close()
 }
 
-func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration, host RetainedHTTPHost) (result runResult, err error) {
+func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration, host RetainedHTTPHost) (runResult, error) {
+	progress := newLiveProgress(time.Now(), false)
+	e.liveMu.Lock()
+	if session := e.live[liveOwner(req)]; session != nil {
+		progress.resumed = true
+	}
+	e.liveMu.Unlock()
+	var combined runResult
+	for attempt := 0; attempt <= 3; attempt++ {
+		progress.restart(time.Now())
+		textOffset, thinkingOffset := 0, 0
+		emit := func(text string, thinking bool) error {
+			progress.observe(time.Now(), text, thinking)
+			offset, existing := &textOffset, &combined.text
+			if thinking {
+				offset, existing = &thinkingOffset, &combined.thinking
+			}
+			already := len(*existing) - *offset
+			if already < 0 {
+				already = 0
+			}
+			match := len(text)
+			if match > already {
+				match = already
+			}
+			if match > 0 && (*existing)[*offset:*offset+match] != text[:match] {
+				return errors.New("Cursor recovery diverged from previously streamed output")
+			}
+			*offset += len(text)
+			text = text[match:]
+			if text == "" {
+				return nil
+			}
+			*existing += text
+			if onText != nil {
+				return onText(text, thinking)
+			}
+			return nil
+		}
+		result, err := e.runLiveAttempt(ctx, req, b, emit, tableTook, host, &progress)
+		combined.output += result.output
+		combined.total = result.total
+		combined.calls = result.calls
+		if err == nil {
+			if textOffset < len(combined.text) || thinkingOffset < len(combined.thinking) {
+				return combined, errors.New("Cursor recovery ended before preserving prior streamed output")
+			}
+			return combined, nil
+		}
+		var retry *liveRetry
+		if !errors.As(err, &retry) || attempt == 3 {
+			return combined, err
+		}
+		timer := time.NewTimer(retry.delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return combined, ctx.Err()
+		}
+	}
+	return combined, errors.New("Cursor recovery limit exceeded")
+}
+
+func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration, host RetainedHTTPHost, progress *liveProgress) (result runResult, err error) {
 	session, resume, err := e.liveSession(ctx, req, b, host)
 	if err != nil {
 		return result, err
@@ -208,7 +290,8 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 	}()
 	stopCancel := context.AfterFunc(ctx, session.cancel)
 	defer stopCancel()
-	result.output = session.output
+	startOutput := session.output
+	defer func() { result.output = session.output - startOutput; result.total = session.total }()
 	if session.expiry != nil {
 		session.generation.Add(1)
 		session.expiry.Stop()
@@ -223,16 +306,22 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 		if len(transcript.Messages) > 0 && transcript.Messages[len(transcript.Messages)-1].Role == "user" {
 			e.retireLive(session)
 			stopCancel()
-			return e.runLive(ctx, req, b, onText, tableTook, host)
+			return e.runLiveAttempt(ctx, req, b, onText, tableTook, host, progress)
 		}
 		results, matchErr := session.results(req.Payload)
 		if matchErr != nil {
 			return result, matchErr
 		}
 		if session.dead.Load() {
+			session.terminalMu.Lock()
+			terminalErr := session.terminalErr
+			session.terminalMu.Unlock()
+			if terminalErr != nil && !recoverableLiveTransport(terminalErr) {
+				return result, terminalErr
+			}
 			stopCancel()
 			e.retireLive(session)
-			return e.runLive(ctx, req, b, onText, tableTook, host)
+			return result, &liveRetry{delay: time.Second, message: "Cursor parked stream closed before result continuation"}
 		}
 		attached, attachErr := host.AttachScope(ctx, session.scope.ID())
 		if attachErr != nil {
@@ -247,10 +336,10 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 		session.pending = nil
 		session.parked = false
 		session.rejections = 0
+		progress.resumed = true
 	}
 	var debounce *time.Timer
 	var batch <-chan time.Time
-	progress := newLiveProgress(time.Now(), resume)
 	watchdog := time.NewTicker(time.Second)
 	defer watchdog.Stop()
 	defer func() {
@@ -266,6 +355,11 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 			return result, errors.New("Cursor retained run was cancelled")
 		case now := <-watchdog.C:
 			if progress.expired(now) {
+				if len(result.calls) == 0 {
+					if delay, ok := progress.recover(now); ok {
+						return result, &liveRetry{delay: delay, message: "Cursor live stream stalled without forward progress"}
+					}
+				}
 				return result, errors.New("Cursor live stream stalled without forward progress")
 			}
 		case <-batch:
@@ -292,16 +386,14 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 				e.retireLive(session)
 			})
 			keep = true
-			result.output = session.output - result.output
-			result.total = session.total
 			return result, nil
 		case frame := <-session.frames:
 			if frame.err != nil {
 				if resume && len(result.calls) == 0 && result.text == "" && result.thinking == "" {
-					if _, status := frame.err.(*HTTPStatusError); !status {
+					if recoverableLiveTransport(frame.err) {
 						stopCancel()
 						e.retireLive(session)
-						return e.runLive(ctx, req, b, onText, tableTook, host)
+						return result, &liveRetry{delay: time.Second, message: "Cursor retained stream closed during result continuation"}
 					}
 				}
 				if errors.Is(frame.err, io.EOF) {
@@ -310,16 +402,9 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 				return result, frame.err
 			}
 			before := len(result.calls)
-			textBefore, thinkingBefore := len(result.text), len(result.thinking)
 			ended, handleErr := e.handleLiveFrame(session, b, frame.message, &result, onText)
 			if handleErr != nil {
 				return result, handleErr
-			}
-			if len(result.text) > textBefore {
-				progress.observe(time.Now(), result.text[textBefore:], false)
-			}
-			if len(result.thinking) > thinkingBefore {
-				progress.observe(time.Now(), result.thinking[thinkingBefore:], true)
 			}
 			if len(result.calls) > before {
 				if debounce == nil {
@@ -339,8 +424,6 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 				if len(result.calls) > 0 {
 					return result, errors.New("Cursor completed a run with unresolved client calls")
 				}
-				result.output = session.output - result.output
-				result.total = session.total
 				return result, nil
 			}
 		}
@@ -361,6 +444,9 @@ func (e *Executor) handleLiveExec(s *liveSession, b *builtRequest, exec *pb.Exec
 			for _, pending := range s.pending {
 				if pending.call.ID == id {
 					return errors.New("Cursor repeated a pending tool call ID")
+				}
+				if pending.exec.Id == exec.Id && pending.exec.ExecId == exec.ExecId {
+					return errors.New("Cursor repeated a pending execution identity")
 				}
 			}
 			decoded := map[string]any{}
@@ -500,7 +586,6 @@ func (e *Executor) handleLiveFrame(s *liveSession, b *builtRequest, message *pb.
 			return true, nil
 		}
 	case *pb.AgentServerMessage_ConversationCheckpointUpdate:
-		s.checkpoint = proto.Clone(m.ConversationCheckpointUpdate).(*pb.ConversationStateStructure)
 		if detail := m.ConversationCheckpointUpdate.TokenDetails; detail != nil {
 			s.total = int(detail.UsedTokens)
 		}

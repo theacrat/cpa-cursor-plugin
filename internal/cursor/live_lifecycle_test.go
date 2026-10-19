@@ -3,6 +3,7 @@ package cursor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -83,6 +84,82 @@ func TestLiveToolLoopResultsRequireOwnedLatestBatch(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"messages": append(append([]chatMessage(nil), s.expected...), messages...)})
 		if _, err := s.results(raw); err == nil {
 			t.Fatal("invalid latest batch accepted")
+		}
+	}
+}
+
+func TestLiveToolLoopRecoversDeadParkWithoutExecutingToolsAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8), afterFirst: true}
+		e := NewExecutor(DefaultConfig())
+		warmFixtureVariants(e)
+		defer e.Close()
+		req := liveRequest(&liveFixtureHost{scope: scope})
+		first, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Choices []struct{ Message chatMessage }
+		}
+		_ = json.Unmarshal(first.Payload, &body)
+		message := body.Choices[0].Message
+		id := message.ToolCalls[0].ID
+		e.liveMu.Lock()
+		session := e.live[liveOwner(req)]
+		e.liveMu.Unlock()
+		session.dead.Store(true)
+		req.Payload, _ = json.Marshal(map[string]any{"messages": []chatMessage{{Role: "system", Content: json.RawMessage(`"Be brief"`)}, {Role: "user", Content: json.RawMessage(`"Hello"`)}, message, {Role: "tool", ToolCallID: id, Content: json.RawMessage(`"completed result"`)}}, "tools": []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}}}}})
+		response, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(response.Payload), "fresh request completed") {
+			t.Fatal("dead park did not recover from completed history")
+		}
+		scope.mu.Lock()
+		defer scope.mu.Unlock()
+		if scope.runs != 2 || scope.results != 0 {
+			t.Fatal("dead park replay injected into a closed pending execution")
+		}
+	})
+}
+
+func TestLiveToolLoopPreservesParkedPermissionAndQuotaErrors(t *testing.T) {
+	for _, status := range []int{403, 429} {
+		scope := &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8)}
+		e := NewExecutor(DefaultConfig())
+		warmFixtureVariants(e)
+		req := liveRequest(&liveFixtureHost{scope: scope})
+		first, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Choices []struct{ Message chatMessage }
+		}
+		_ = json.Unmarshal(first.Payload, &body)
+		message := body.Choices[0].Message
+		id := message.ToolCalls[0].ID
+		e.liveMu.Lock()
+		session := e.live[liveOwner(req)]
+		e.liveMu.Unlock()
+		session.terminalMu.Lock()
+		session.terminalErr = &HTTPStatusError{StatusCode: status}
+		session.terminalMu.Unlock()
+		session.dead.Store(true)
+		req.Payload, _ = json.Marshal(map[string]any{"messages": []chatMessage{{Role: "system", Content: json.RawMessage(`"Be brief"`)}, {Role: "user", Content: json.RawMessage(`"Hello"`)}, message, {Role: "tool", ToolCallID: id, Content: json.RawMessage(`"completed result"`)}}, "tools": []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}}}}})
+		_, err = e.Execute(context.Background(), req)
+		var upstream *HTTPStatusError
+		if !errors.As(err, &upstream) || upstream.StatusCode != status {
+			t.Fatalf("parked status %d was hidden: %v", status, err)
+		}
+		e.Close()
+		scope.mu.Lock()
+		runs := scope.runs
+		scope.mu.Unlock()
+		if runs != 1 {
+			t.Fatal("permission failure triggered a replacement run")
 		}
 	}
 }
