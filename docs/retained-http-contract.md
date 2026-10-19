@@ -34,6 +34,13 @@ numbers alone do not imply support. The C function table is unchanged. The plugi
 may decode additive JSON fields and use the existing string callback interface
 without replacing its SDK dependency solely for this feature.
 
+Each executor request also carries host-owned boolean metadata
+`retained_http_eligible`. The host overwrites this from the current selected
+binding. The plugin requires literal `true` in addition to lifecycle capability.
+Opaque transports, request decorators and unsupported response writers therefore
+retain stateless execution without probing a retained scope. Missing, false or
+malformed eligibility cannot enable the capability.
+
 ## callback methods
 
 | method | request | response |

@@ -193,6 +193,8 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, errors.New("invalid executor request")
 		}
+		eligible, _ := req.Metadata["retained_http_eligible"].(bool)
+		client.retained = client.retained && eligible
 		req.HTTPClient = client
 		if method == pluginabi.MethodExecutorCountTokens {
 			return p.executor.CountTokens(ctx, req)
