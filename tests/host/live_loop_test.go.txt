@@ -60,6 +60,8 @@ type cursorNativeUpstream struct {
 	closeOnce     sync.Once
 	failures      chan error
 	wantResult    string
+	batch         int
+	rounds        int
 }
 
 func cursorNativeBytes(field protowire.Number, value []byte) []byte {
@@ -224,18 +226,7 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 		return
 	}
 	if _, run := client[1]; run {
-		args := append(cursorNativeString(1, "skill"), cursorNativeString(3, "upstream\ncomposite-call")...)
-		args = append(args, cursorNativeString(4, "cpa")...)
-		args = append(args, cursorNativeString(5, "mcp_cpa_skill")...)
-		entry := append(cursorNativeString(1, "id"), cursorNativeBytes(2, cursorNativeString(3, "using-agent-skills"))...)
-		args = append(args, cursorNativeBytes(2, entry)...)
-		exec := append(cursorNativeNumber(1, 7), cursorNativeString(15, "fixture-exec")...)
-		exec = append(exec, cursorNativeBytes(11, args)...)
-		select {
-		case upstream.frames <- cursorNativeBytes(2, exec):
-		case <-upstream.closed:
-		case <-request.Context().Done():
-		}
+		upstream.calls(request.Context(), 0)
 	} else if result, exists := client[2]; exists {
 		exec, err := cursorNativeFields(result)
 		if err != nil {
@@ -244,11 +235,21 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 		}
 		id, _ := protowire.ConsumeVarint(exec[1])
 		text, err := cursorNativeNested(exec[11], 1, 1, 1, 1)
-		if id != 7 || string(exec[15]) != "fixture-exec" || err != nil || string(text) != upstream.wantResult {
+		wantID := uint64(7 + upstream.results.Load())
+		if id != wantID || string(exec[15]) != "fixture-exec" || err != nil || string(text) != upstream.wantResult {
 			upstream.fail(w, errors.New("fixture result identity or complete skill content was lost"))
 			return
 		}
-		upstream.results.Add(1)
+		completed := int(upstream.results.Add(1))
+		if completed%upstream.batch != 0 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if completed < upstream.batch*upstream.rounds {
+			upstream.calls(request.Context(), completed)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		for _, frame := range [][]byte{cursorNativeBytes(1, cursorNativeBytes(1, cursorNativeString(1, "continued through native host"))), cursorNativeBytes(1, cursorNativeBytes(14, nil))} {
 			select {
 			case upstream.frames <- frame:
@@ -262,6 +263,25 @@ func (upstream *cursorNativeUpstream) append(w http.ResponseWriter, request *htt
 	}
 	w.Header().Set("Content-Type", "application/proto")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (upstream *cursorNativeUpstream) calls(ctx context.Context, offset int) {
+	for index := 0; index < upstream.batch; index++ {
+		args := append(cursorNativeString(1, "skill"), cursorNativeString(3, fmt.Sprintf("upstream\ncomposite-call-%d", offset+index))...)
+		args = append(args, cursorNativeString(4, "cpa")...)
+		args = append(args, cursorNativeString(5, "mcp_cpa_skill")...)
+		entry := append(cursorNativeString(1, "id"), cursorNativeBytes(2, cursorNativeString(3, "using-agent-skills"))...)
+		args = append(args, cursorNativeBytes(2, entry)...)
+		exec := append(cursorNativeNumber(1, uint64(7+offset+index)), cursorNativeString(15, "fixture-exec")...)
+		exec = append(exec, cursorNativeBytes(11, args)...)
+		select {
+		case upstream.frames <- cursorNativeBytes(2, exec):
+		case <-upstream.closed:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func cursorNativeRequest(t *testing.T, engine http.Handler, stream bool, messages []map[string]any) ([]byte, []cursorNativeCall) {
@@ -341,9 +361,12 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 		headers          http.Header
 		stateless        bool
 		unverifiedWriter bool
+		batch            int
+		rounds           int
 	}{
 		{name: "buffered"},
 		{name: "streaming", stream: true},
+		{name: "batched rounds", stream: true, batch: 2, rounds: 2},
 		{name: "missing purpose", headers: http.Header{"X-Cpa-Request-Kind": nil}, stateless: true},
 		{name: "title", headers: http.Header{"X-Cpa-Request-Kind": {"title"}}, stateless: true},
 		{name: "compaction", headers: http.Header{"X-Cpa-Request-Kind": {"compaction"}}, stateless: true},
@@ -352,7 +375,8 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 		{name: "unverified flush", unverifiedWriter: true, stateless: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), closed: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
+			batch, rounds := max(test.batch, 1), max(test.rounds, 1)
+			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), closed: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>", batch: batch, rounds: rounds}
 			server := httptest.NewServer(upstream)
 			defer server.Close()
 			defer upstream.stop()
@@ -398,7 +422,7 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 			engine.POST("/v1/chat/completions", openaihandlers.NewOpenAIAPIHandler(base).ChatCompletions)
 			messages := []map[string]any{{"role": "user", "content": "load the fixture skill"}}
 			_, calls := cursorNativeRequestWithHeaders(t, engine, test.stream, messages, test.headers)
-			if len(calls) != 1 || calls[0].Function.Name != "skill" || calls[0].Function.Arguments != `{"id":"using-agent-skills"}` || strings.ContainsAny(calls[0].ID, "\r\n\t") {
+			if len(calls) == 0 || calls[0].Function.Name != "skill" || calls[0].Function.Arguments != `{"id":"using-agent-skills"}` || strings.ContainsAny(calls[0].ID, "\r\n\t") {
 				t.Fatal("native host lost the executable skill call")
 			}
 			if test.stateless || os.Getenv("CPA_LIVE_EXPECT_STATELESS") == "1" {
@@ -417,13 +441,22 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 				t.Fatal("native host closed the retained stream after delivering tool calls")
 			default:
 			}
-			messages = append(messages, map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, map[string]any{"role": "tool", "tool_call_id": calls[0].ID, "content": upstream.wantResult})
-			response, nextCalls := cursorNativeRequest(t, engine, test.stream, messages)
-			if len(nextCalls) != 0 || !bytes.Contains(response, []byte("continued through native host")) {
+			var response []byte
+			for round := 0; round < rounds; round++ {
+				if len(calls) != batch {
+					t.Fatalf("native round %d calls=%d want=%d", round, len(calls), batch)
+				}
+				messages = append(messages, map[string]any{"role": "assistant", "content": nil, "tool_calls": calls})
+				for _, call := range calls {
+					messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": upstream.wantResult})
+				}
+				response, calls = cursorNativeRequest(t, engine, test.stream, messages)
+			}
+			if len(calls) != 0 || !bytes.Contains(response, []byte("continued through native host")) {
 				t.Fatal("actual client result did not continue the native host run")
 			}
-			if upstream.runs.Load() != 1 || upstream.results.Load() != 1 {
-				t.Fatalf("native lifecycle runs=%d results=%d, want one each", upstream.runs.Load(), upstream.results.Load())
+			if upstream.runs.Load() != 1 || upstream.results.Load() != int32(batch*rounds) {
+				t.Fatalf("native lifecycle runs=%d results=%d, want one run and %d results", upstream.runs.Load(), upstream.results.Load(), batch*rounds)
 			}
 			select {
 			case err := <-upstream.failures:
