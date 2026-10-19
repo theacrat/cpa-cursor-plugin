@@ -16,13 +16,11 @@ def git(directory: Path, *arguments: str) -> str:
     ).strip()
 
 
-def snapshot(source: Path, target: Path) -> str:
-    revision = git(source, "rev-parse", "HEAD")
+def snapshot(source: Path, target: Path, revision: str) -> None:
     archive = subprocess.check_output(["git", "-C", str(source), "archive", revision])
     target.mkdir()
     with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
         bundle.extractall(target, filter="data")
-    return revision
 
 
 def main() -> None:
@@ -33,8 +31,10 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent
     host_source = arguments.host.resolve(strict=True)
     plugin_source = (arguments.plugin or root).resolve(strict=True)
+    host_revision = git(host_source, "rev-parse", "HEAD")
+    plugin_revision = git(plugin_source, "rev-parse", "HEAD")
     subprocess.run(
-        ["git", "-C", str(host_source), "merge-base", "--is-ancestor", HOST_BASE, "HEAD"],
+        ["git", "-C", str(host_source), "merge-base", "--is-ancestor", HOST_BASE, host_revision],
         check=True,
     )
     scratch = root / ".scratch"
@@ -43,8 +43,8 @@ def main() -> None:
         directory = Path(temporary)
         host = directory / "host"
         plugin = directory / "plugin"
-        host_revision = snapshot(host_source, host)
-        plugin_revision = snapshot(plugin_source, plugin)
+        snapshot(host_source, host, host_revision)
+        snapshot(plugin_source, plugin, plugin_revision)
         environment = os.environ.copy()
         environment.update({
             "CGO_ENABLED": "1", "TMPDIR": str(directory),
@@ -64,7 +64,7 @@ def main() -> None:
         overlay = directory / "live-host-overlay.json"
         overlay.write_text(json.dumps({"Replace": {
             str(host / "internal/pluginhost/cursor_live_native_test.go"):
-                str(root / "tests/host/live_loop_test.go.txt"),
+                str(plugin / "tests/host/live_loop_test.go.txt"),
         }}))
         print(f"live native fixture host={host_revision} plugin={plugin_revision}", flush=True)
         subprocess.run(
