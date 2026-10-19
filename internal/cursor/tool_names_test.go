@@ -11,6 +11,7 @@ func TestToolNamesAndAliasesCannotIdentifyDifferentFunctions(t *testing.T) {
 		{"cpa-lookup", "lookup"},
 		{"lookup", "mcp_cpa_lookup", "mcp_cpa_mcp_cpa_lookup"},
 		{"lookup", "cpa-lookup", "mcp_cpa_lookup", "lookup_2", "cpa-lookup_2"},
+		{"lookup", "cpa-mcp_cpa_lookup", "mcp_cpa_lookup"},
 	} {
 		t.Run(names[0]+names[len(names)-1], func(t *testing.T) {
 			tools := make([]map[string]any, 0, len(names))
@@ -25,7 +26,7 @@ func TestToolNamesAndAliasesCannotIdentifyDifferentFunctions(t *testing.T) {
 			}
 			for _, name := range names {
 				wire := built.wire[name]
-				for _, alias := range []string{wire, "mcp_cpa_" + wire, "cpa-" + wire} {
+				for _, alias := range []string{wire, "mcp_cpa_" + wire, "cpa-" + wire, "cpa-mcp_cpa_" + wire} {
 					if got := built.resolve[alias]; got != name {
 						t.Errorf("tool %q alias %q resolves to %q", name, alias, got)
 					}

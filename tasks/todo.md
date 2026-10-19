@@ -1,7 +1,7 @@
-# minimal model label tasks
+# client tool and session compatibility tasks
 
-- [x] strip recognised display-only annotations without changing metadata.
-- [x] qualify only visible duplicate names and preserve custom names.
-- [x] verify OpenAI and Codex catalogue behaviour, including idempotence.
-- [x] complete review, full checks and pinned-host verification.
-- [x] save changes locally without deploying.
+- [x] inspect both linked sessions and distinguish actual errors from model claims.
+- [x] reproduce and repair client-tool catalogue and disabled-native dispatch defects.
+- [x] verify actual user-ended summaries and preserve model-switch history and statuses.
+- [ ] review every change since `53ff244` independently and loop corrective fixes.
+- [ ] pass the final exact-SHA gates and retain local evidence without deployment.

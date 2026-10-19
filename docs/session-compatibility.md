@@ -1,0 +1,65 @@
+# client tools and model-switch compatibility
+
+## observed failures
+
+The reported Grok session `ses_eae92fe84ffe37TpTO7P7R5xC2` contains two durable
+client-tool calls, both completed `skill` invocations. Its claimed read, shell and
+dynamic-tool failures did not produce OpenCode client-tool records. Those claims
+alone cannot prove the client catalogue was missing.
+
+The second reported session `ses_eb46c55dfffekif88EzQqKMN1z` records Cursor Opus
+returning HTTP 429 at `msg_1515a4cdd001u4Eyh5biROGIu8`. After switching to the
+opencode-go Grok route, compaction returned HTTP 403 with `plugin call failed` at
+`msg_1515f7c11001f3L3CrAqXFtZMN`. The compaction error was not produced by this
+Cursor executor. Quota, eligibility and bridge protocol failures must remain
+separate diagnoses.
+
+## reproduced bridge defects
+
+The bridge did not recognise the provider-qualified advertised spelling
+`cpa-mcp_cpa_read` when supplied through McpArgs.name. The public catalogue, request
+instructions and refusal messages did not explain the exact registered entries,
+while generic native failures made it easy to conclude that all tools were absent.
+Typed refusals, explicit executable-client guidance, available-tool lists and a
+bounded rejection counter now distinguish these paths. No native execution or
+automatic native-to-client argument conversion is introduced.
+
+An initial assistant-ended summary fixture was rejected by the bridge, but source
+inspection of OpenCode v2.0.29 confirms its real compaction request ends in a user
+summary prompt. The speculative input relaxation was removed. Faithful fixtures
+now retain historical exchanges, preserve the final summary prompt and do not
+re-expose tools missing from the current catalogue. Assistant prefills remain
+unsupported, rather than being silently reinterpreted as summaries.
+
+## verification boundary
+
+Local TLS HTTP/2 fixtures exercise native refusal followed by a real client-tool
+call, all known aliases, namespace collisions, typed failure replies, bounded
+retries, actual user-ended summary requests and preserved HTTP 403/429.
+These fixtures do not claim a live Grok success or a repaired external quota.
+
+Deployments remain on hold. No live model request, quota override, provider switch
+or external repository modification is authorised by these fixes.
+
+## external findings
+
+The linked 403's original explanation is not recoverable from the stored error.
+Pinned CPA replaces empty plugin error messages with `plugin call failed`, then
+labels generic HTTP 403 as `insufficient_quota`. OpenCode classifies that code as
+quota before considering generic permission failures. This proves a rejection,
+not specifically exhausted quota. The responsible external provider plugin and
+its sanitised upstream error need inspection before claiming a quota fix.
+
+OpenCode v2.0.29 normally uses the selected session model for compaction, unless a
+compaction-agent override exists. Its estimation can reuse previous token usage
+when only the aggregator provider ID matches, even after changing model routes.
+The last successful response before this switch reported 830,216 input tokens.
+This explains an immediate compaction attempt, but historical model limits are
+not stored and do not prove that compaction was unnecessary. No usage or context
+limits are falsified to suppress it.
+
+Relevant OpenCode source is version 2.0.29, commit
+`042d0832f5f3a73eaa039a58a7d565776f6d4290`, especially
+`packages/core/src/session/compaction.ts:213-220,285-296,581-590,918-923`.
+The provider-only token provenance check and external Go-provider error handling
+are outside this repository. Neither is reported as fixed by this patch.

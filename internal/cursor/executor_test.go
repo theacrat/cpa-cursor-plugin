@@ -120,7 +120,7 @@ func TestNativeHTTP2Duplex(t *testing.T) {
 			t.Error("context catalogue missing")
 		}
 		writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: 13, Message: &pb.ExecServerMessage_ShellArgs{ShellArgs: &pb.ShellArgs{Command: "must-not-run"}}}}})
-		if readClient(t, r.Body).GetExecClientControlMessage().GetThrow().Id != 13 {
+		if reply := readClient(t, r.Body).GetExecClientMessage(); reply == nil || reply.Id != 13 || reply.GetShellResult().GetRejected() == nil {
 			t.Error("native execution not explicitly rejected")
 		}
 		writeServer(t, w, update(&pb.InteractionUpdate{Message: &pb.InteractionUpdate_ThinkingDelta{ThinkingDelta: &pb.ThinkingDeltaUpdate{Text: "reason"}}}))

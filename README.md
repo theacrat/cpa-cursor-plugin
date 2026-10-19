@@ -137,6 +137,19 @@ Use a stable unique `id` for access-token-only records. Include an optional `api
 - Tools remain client-owned. The plugin must not perform model-requested local operations on the CPA server.
 - Fixture tests do not prove compatibility with a live account. Live OAuth and inference verification must be reported separately.
 
+## Tool and session compatibility
+
+The model-list tools flag describes forwarding registered client tools, not native
+Cursor filesystem, shell, network or subagent execution. Caller-provided function
+tools are advertised through the `cpa` MCP server. Native tool requests are rejected
+without performing the operation, with schema guidance for the actual client entries.
+Repeated disabled-tool requests are bounded rather than silently retried forever.
+
+Summaries retain complete history before the final user summary prompt after a
+model switch, without exposing tools absent from the current catalogue. HTTP
+403 and 429 still propagate as permission/rate-limit failures. Changing models
+does not bypass a provider's quota or make a different provider's plugin eligible.
+
 ## Development
 
 The project uses Go, CGO and a C compiler. Build artefacts are placed under `dist/<os>-<arch>/`. Toolchain and CI commands are documented by `mise.toml` and `Makefile`; the checks include pure Go tests, race tests and a native C loader.

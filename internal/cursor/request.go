@@ -204,13 +204,20 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				base = "tool"
 			}
 			wire := base
-			for i := 2; b.resolve[wire] != "" || b.resolve["mcp_"+toolProvider+"_"+wire] != "" || b.resolve[toolProvider+"-"+wire] != ""; i++ {
-				wire = fmt.Sprintf("%s_%d", base, i)
+			for index := 2; ; index++ {
+				collision := false
+				for _, alias := range clientToolAliases(wire) {
+					collision = collision || b.resolve[alias] != ""
+				}
+				if !collision {
+					break
+				}
+				wire = fmt.Sprintf("%s_%d", base, index)
 			}
 			b.wire[name] = wire
-			b.resolve[wire] = name
-			b.resolve["mcp_"+toolProvider+"_"+wire] = name
-			b.resolve[toolProvider+"-"+wire] = name
+			for _, alias := range clientToolAliases(wire) {
+				b.resolve[alias] = name
+			}
 		}
 	}
 	if string(chat.ToolChoice) != "\"none\"" {
@@ -244,7 +251,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 			system = append(system, text)
 		}
 	}
-	policy := "Use only registered MCP client tools. Native filesystem, shell, computer, network and subagent execution are unavailable. Call tools through the MCP catalogue; do not use native tools."
+	policy := clientToolPolicy(b.tools)
 	systemText := strings.Join(system, "\n\n")
 	state := &pb.ConversationStateStructure{Mode: proto.Int32(1), ClientName: "cpa-cursor"}
 	addRoot := func(value any) error {
@@ -274,7 +281,6 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 	var current *pb.AgentConversationTurnStructure
 	calls := map[string]*pb.McpToolCall{}
 	callNames := map[string]string{}
-	// Tool-ended transcripts are fully replayed and followed by ResumeAction.
 	historyEnd := len(chat.Messages)
 	if last.Role == "user" {
 		historyEnd--
@@ -356,7 +362,6 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				callNames[tc.ID] = wire
 				mc := &pb.McpToolCall{Args: &pb.McpArgs{Name: wire, ToolName: wire, ProviderIdentifier: toolProvider, ToolCallId: tc.ID, Args: encoded}}
 				calls[tc.ID] = mc
-				// The step is stored after its result arrives, not as an unresolved call.
 				parts = append(parts, map[string]any{"type": "tool-call", "toolCallId": tc.ID, "toolName": "mcp_" + toolProvider + "_" + wire, "args": args})
 			}
 			if len(parts) > 0 {
@@ -397,7 +402,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 	if err := flushTurn(); err != nil {
 		return nil, err
 	}
-	context := &pb.RequestContext{Env: &pb.RequestContextEnv{}, Tools: b.tools}
+	context := clientRequestContext(b.tools)
 	action := &pb.ConversationAction{Action: &pb.ConversationAction_ResumeAction{ResumeAction: &pb.ResumeAction{RequestContext: context}}}
 	if last.Role == "user" {
 		text, images, err := content(last.Content)

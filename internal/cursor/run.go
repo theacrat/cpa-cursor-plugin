@@ -56,8 +56,6 @@ func (r runResult) usage() map[string]int {
 }
 
 func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration) (runResult, error) {
-	// Cancellation closes the host pump before draining it. The child context
-	// also ensures early tool-call completion cancels the host's live stream.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timing := runTiming{start: time.Now(), table: tableTook, inBytes: len(req.Payload)}
@@ -83,12 +81,13 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 	defer func() { cancel(); t.close() }()
 	r := runResult{}
 	seen := map[string]bool{}
+	rejectedTools := 0
 	reader := t.reader.(frameReader)
-	first := true
+	firstFrame := true
 	for {
 		flags, raw, err := readFrame(reader.Reader, reader.encoding)
-		if first && err == nil {
-			first = false
+		if firstFrame && err == nil {
+			firstFrame = false
 			timing.firstByte = time.Since(timing.start)
 		}
 		if err != nil {
@@ -190,8 +189,12 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 						break
 					}
 				}
-				if !available {
-					result := &pb.ExecClientMessage{Id: exec.Id, ExecId: exec.ExecId, Message: &pb.ExecClientMessage_McpResult{McpResult: &pb.McpResult{Result: &pb.McpResult_ToolNotFound{ToolNotFound: &pb.McpToolNotFound{Name: args.ToolName}}}}}
+				if !available || args.ProviderIdentifier != "" && args.ProviderIdentifier != toolProvider {
+					rejectedTools++
+					if rejectedTools > maxRejectedToolCalls {
+						return done(r, errors.New("Cursor repeatedly requested unavailable tools; no client operation was performed"))
+					}
+					result := &pb.ExecClientMessage{Id: exec.Id, ExecId: exec.ExecId, Message: &pb.ExecClientMessage_McpResult{McpResult: &pb.McpResult{Result: &pb.McpResult_ToolNotFound{ToolNotFound: &pb.McpToolNotFound{Name: first(args.ToolName, args.Name), AvailableTools: advertisedClientTools(b.tools)}}}}}
 					if err := t.send(&pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: result}}); err != nil {
 						return done(r, err)
 					}
@@ -215,9 +218,13 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 					r.calls = append(r.calls, toolCall{ID: id, Type: "function", Function: functionCall{Name: name, Arguments: string(rawArgs)}})
 					seen[id] = true
 				}
-				// OpenAI callers must execute the tool outside this plugin. Stop this run
-				// now; the next call's full transcript carries the result into ResumeAction.
 				return done(r, nil)
+			}
+			if exec.GetRequestContextArgs() == nil && exec.GetMcpStateExecArgs() == nil {
+				rejectedTools++
+				if rejectedTools > maxRejectedToolCalls {
+					return done(r, errors.New("Cursor repeatedly requested disabled native tools; no native operation was performed"))
+				}
 			}
 			reply, err := execReply(exec, b.tools)
 			if err != nil {
@@ -227,11 +234,8 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				return done(r, err)
 			}
 		case *pb.AgentServerMessage_InteractionQuery:
-			// These require user approval or an interactive UI not represented by
-			// chat-completions. Fail rather than invent consent or execute a network tool.
 			return done(r, errors.New("Cursor interaction query requires an unsupported interactive approval flow"))
 		case *pb.AgentServerMessage_ExecServerControlMessage:
-			// Abort notices relate to an individual exec, not necessarily this turn.
 		default:
 			return done(r, errors.New("unsupported Cursor server message; protocol schema may have changed"))
 		}
@@ -241,7 +245,7 @@ func execReply(exec *pb.ExecServerMessage, tools []*pb.McpToolDefinition) (*pb.A
 	reply := &pb.ExecClientMessage{Id: exec.Id, ExecId: exec.ExecId}
 	switch exec.Message.(type) {
 	case *pb.ExecServerMessage_RequestContextArgs:
-		reply.Message = &pb.ExecClientMessage_RequestContextResult{RequestContextResult: &pb.RequestContextResult{Result: &pb.RequestContextResult_Success{Success: &pb.RequestContextSuccess{RequestContext: &pb.RequestContext{Env: &pb.RequestContextEnv{}, Tools: tools}}}}}
+		reply.Message = &pb.ExecClientMessage_RequestContextResult{RequestContextResult: &pb.RequestContextResult{Result: &pb.RequestContextResult_Success{Success: &pb.RequestContextSuccess{RequestContext: clientRequestContext(tools)}}}}
 	case *pb.ExecServerMessage_McpStateExecArgs:
 		advertised := make([]*pb.McpToolDefinition, 0, len(tools))
 		for _, tool := range tools {
@@ -251,14 +255,11 @@ func execReply(exec *pb.ExecServerMessage, tools []*pb.McpToolDefinition) (*pb.A
 		}
 		servers := []*pb.McpStateServer{}
 		if len(tools) > 0 {
-			servers = append(servers, &pb.McpStateServer{ServerName: toolProvider, ServerIdentifier: toolProvider, Tools: advertised})
+			servers = append(servers, &pb.McpStateServer{ServerName: toolProvider, ServerIdentifier: toolProvider, Tools: advertised, Instructions: []*pb.McpInstructions{{ServerName: toolProvider, Instructions: clientToolPolicy(tools)}}})
 		}
 		reply.Message = &pb.ExecClientMessage_McpStateExecResult{McpStateExecResult: &pb.McpStateExecResult{Result: &pb.McpStateExecResult_Success{Success: &pb.McpStateSuccess{Servers: servers}}}}
 	default:
-		// The generic throw is explicitly a failed exec, never a fabricated success.
-		// It covers known native operations and unknown protocol variants safely.
-		reason := "Native local filesystem, shell, computer, network and subagent operations are unavailable. Use the registered MCP client tools instead."
-		return &pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientControlMessage{ExecClientControlMessage: &pb.ExecClientControlMessage{Message: &pb.ExecClientControlMessage_Throw{Throw: &pb.ExecClientThrow{Id: exec.Id, Error: reason}}}}}, nil
+		return refusedNativeExec(exec, tools), nil
 	}
 	return &pb.AgentClientMessage{Message: &pb.AgentClientMessage_ExecClientMessage{ExecClientMessage: reply}}, nil
 }
