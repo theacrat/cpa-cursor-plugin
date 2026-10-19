@@ -128,8 +128,19 @@ type frameReader struct {
 	encoding string
 }
 
-// RunSSE plus BidiAppend is Cursor CLI's fixed-body duplex emulation. It
-// preserves CPA transport policy; sequence numbers are serialised per run.
+func hostStreamError(err error) error {
+	var status *HTTPStatusError
+	if errors.As(err, &status) && status != nil {
+		return &HTTPStatusError{StatusCode: status.StatusCode}
+	}
+	for _, cause := range []error{io.ErrUnexpectedEOF, io.EOF, context.Canceled, context.DeadlineExceeded} {
+		if errors.Is(err, cause) {
+			return cause
+		}
+	}
+	return errors.New("Cursor host stream failed")
+}
+
 func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest) (*runTransport, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	ready := false
@@ -183,7 +194,7 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 					return
 				}
 				if c.Err != nil {
-					_ = pw.CloseWithError(errors.New("Cursor RunSSE stream failed"))
+					_ = pw.CloseWithError(hostStreamError(c.Err))
 					return
 				}
 				if len(c.Payload) > maxFrame+5 {
@@ -208,7 +219,6 @@ func (e *Executor) hostRun(ctx context.Context, req pluginapi.ExecutorRequest, b
 		if len(raw) > maxFrame {
 			return errors.New("Cursor append exceeds limit")
 		}
-		// Official field 1 is hex-encoded protobuf, field 2 is BidiRequestId.
 		body := protowire.AppendString(protowire.AppendTag(nil, 1, protowire.BytesType), hex.EncodeToString(raw))
 		body = protowire.AppendBytes(protowire.AppendTag(body, 2, protowire.BytesType), bidiID)
 		body = protowire.AppendVarint(protowire.AppendTag(body, 3, protowire.VarintType), seq)
