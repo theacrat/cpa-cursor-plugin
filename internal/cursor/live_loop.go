@@ -500,38 +500,13 @@ func liveExpectedHistory(payload []byte, result runResult) ([]chatMessage, error
 }
 
 func (s *liveSession) results(payload []byte) ([]*pb.AgentClientMessage, error) {
-	var chat chatRequest
-	if json.Unmarshal(payload, &chat) != nil {
-		return nil, errors.New("invalid Cursor live transcript")
-	}
-	if len(chat.Messages) < len(s.expected) {
-		return nil, errors.New("Cursor retained transcript prefix does not match")
-	}
-	for index, want := range s.expected {
-		got := chat.Messages[index]
-		left, _ := json.Marshal(canonicalLiveMessage(want))
-		right, _ := json.Marshal(canonicalLiveMessage(got))
-		if string(left) != string(right) {
-			return nil, errors.New("Cursor retained transcript prefix does not match")
-		}
-	}
-	tail := chat.Messages[len(s.expected):]
-	if len(tail) != len(s.pending) {
-		return nil, errors.New("Cursor retained result batch is incomplete or duplicated")
-	}
-	byID := map[string]chatMessage{}
-	for _, message := range tail {
-		if message.Role != "tool" || byID[message.ToolCallID].Role != "" {
-			return nil, errors.New("Cursor retained result batch is invalid")
-		}
-		byID[message.ToolCallID] = message
+	messages, err := liveResultMessages(s.expected, s.pending, payload)
+	if err != nil {
+		return nil, err
 	}
 	replies := make([]*pb.AgentClientMessage, 0, len(s.pending))
-	for _, pending := range s.pending {
-		message, ok := byID[pending.call.ID]
-		if !ok {
-			return nil, errors.New("Cursor retained result has no matching execution")
-		}
+	for index, pending := range s.pending {
+		message := messages[index]
 		text, images, err := content(message.Content)
 		if err != nil {
 			return nil, err

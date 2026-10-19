@@ -11,8 +11,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// Executor owns active runs, not conversation state. Every request republishes
-// the caller's full transcript, including tool results from previous turns.
 type Executor struct {
 	cfg       Config
 	configErr error
@@ -135,6 +133,10 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 		return pluginapi.ExecutorResponse{}, err
 	}
 	req.Model = variant
+	req, err = e.repairLiveReplay(req)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
 	built, err := buildRequest(req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
@@ -167,6 +169,11 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
 	req.Model = variant
+	req, err = e.repairLiveReplay(req)
+	if err != nil {
+		release()
+		return pluginapi.ExecutorStreamResponse{}, err
+	}
 	built, err := buildRequest(req)
 	if err != nil {
 		release()
@@ -190,8 +197,6 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		}
 		emit := func(delta map[string]any, finish any, usage any) error {
 			choice := map[string]any{"index": 0, "delta": delta}
-			// Strict downstream parsers reject an explicit null
-			// finish_reason; omit it until the terminal chunk.
 			if finish != nil {
 				choice["finish_reason"] = finish
 			}

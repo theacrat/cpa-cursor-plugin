@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 func liveResultMessages(expected []chatMessage, pending []livePending, payload []byte) ([]chatMessage, error) {
@@ -60,4 +62,45 @@ func liveResultMessages(expected []chatMessage, pending []livePending, payload [
 		results = append(results, message)
 	}
 	return results, nil
+}
+
+func (e *Executor) repairLiveReplay(req pluginapi.ExecutorRequest) (pluginapi.ExecutorRequest, error) {
+	host, ok := req.HTTPClient.(RetainedHTTPHost)
+	if !ok || !host.SupportsRetainedHTTP() || liveOwner(req) == "" || len(req.Payload) > maxFrame {
+		return req, nil
+	}
+	var chat chatRequest
+	if json.Unmarshal(req.Payload, &chat) != nil || len(chat.Messages) == 0 || chat.Messages[len(chat.Messages)-1].Role != "tool" {
+		return req, nil
+	}
+	assistant := len(chat.Messages) - 1
+	for assistant >= 0 && chat.Messages[assistant].Role == "tool" {
+		assistant--
+	}
+	if assistant < 0 || chat.Messages[assistant].Role != "assistant" || len(chat.Messages[assistant].ToolCalls) != 0 {
+		return req, nil
+	}
+	e.liveMu.Lock()
+	session := e.live[liveOwner(req)]
+	if session == nil || !session.mu.TryLock() {
+		e.liveMu.Unlock()
+		return req, nil
+	}
+	e.liveMu.Unlock()
+	defer session.mu.Unlock()
+	if !session.parked || session.closed {
+		return req, nil
+	}
+	if _, err := liveResultMessages(session.expected, session.pending, req.Payload); err != nil {
+		return req, err
+	}
+	var fields map[string]json.RawMessage
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(req.Payload, &fields) != nil || json.Unmarshal(fields["messages"], &messages) != nil {
+		return req, errors.New("invalid Cursor live transcript")
+	}
+	messages[assistant]["tool_calls"], _ = json.Marshal(session.expected[len(session.expected)-1].ToolCalls)
+	fields["messages"], _ = json.Marshal(messages)
+	req.Payload, _ = json.Marshal(fields)
+	return req, nil
 }
