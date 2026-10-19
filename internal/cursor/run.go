@@ -56,7 +56,7 @@ func (r runResult) usage() map[string]int {
 }
 
 func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration) (runResult, error) {
-	if host, ok := req.HTTPClient.(RetainedHTTPHost); ok && host.SupportsRetainedHTTP() && liveOwner(req) != "" {
+	if host, ok := req.HTTPClient.(RetainedHTTPHost); ok && host.SupportsRetainedHTTP() && liveOwner(req) != "" && len(b.tools) > 0 {
 		return e.runLive(ctx, req, b, onText, tableTook, host)
 	}
 	return e.runStateless(ctx, req, b, onText, tableTook)
