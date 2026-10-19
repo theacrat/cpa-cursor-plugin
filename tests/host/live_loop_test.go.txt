@@ -41,6 +41,8 @@ type cursorNativeCall struct {
 
 type cursorNativeRecorder struct{ *httptest.ResponseRecorder }
 
+type cursorNativeLegacyWriter struct{ gin.ResponseWriter }
+
 func (recorder *cursorNativeRecorder) FlushError() error {
 	recorder.Flush()
 	return nil
@@ -334,10 +336,11 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 	}
 	gin.SetMode(gin.TestMode)
 	for _, test := range []struct {
-		name      string
-		stream    bool
-		headers   http.Header
-		stateless bool
+		name             string
+		stream           bool
+		headers          http.Header
+		stateless        bool
+		unverifiedWriter bool
 	}{
 		{name: "buffered"},
 		{name: "streaming", stream: true},
@@ -346,6 +349,7 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 		{name: "compaction", headers: http.Header{"X-Cpa-Request-Kind": {"compaction"}}, stateless: true},
 		{name: "generate", headers: http.Header{"X-Cpa-Request-Kind": {"generate"}}, stateless: true},
 		{name: "missing session", headers: http.Header{"X-Opencode-Session-Id": nil}, stateless: true},
+		{name: "unverified flush", unverifiedWriter: true, stateless: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			upstream := &cursorNativeUpstream{frames: make(chan []byte, 8), streamEnded: make(chan struct{}), closed: make(chan struct{}), failures: make(chan error, 8), wantResult: "<skill_content>" + strings.Repeat("complete fixture skill content\n", 1000) + "</skill_content>"}
@@ -388,6 +392,9 @@ func TestCursorLiveNativeToolLoop(t *testing.T) {
 			host.SetModelExecutor(base)
 			engine := gin.New()
 			engine.Use(func(ctx *gin.Context) { ctx.Set("userApiKey", "fixture-downstream-caller"); ctx.Next() })
+			if test.unverifiedWriter {
+				engine.Use(func(ctx *gin.Context) { ctx.Writer = &cursorNativeLegacyWriter{ResponseWriter: ctx.Writer}; ctx.Next() })
+			}
 			engine.POST("/v1/chat/completions", openaihandlers.NewOpenAIAPIHandler(base).ChatCompletions)
 			messages := []map[string]any{{"role": "user", "content": "load the fixture skill"}}
 			_, calls := cursorNativeRequestWithHeaders(t, engine, test.stream, messages, test.headers)
