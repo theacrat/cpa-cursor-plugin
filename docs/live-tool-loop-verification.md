@@ -56,6 +56,42 @@ The full upstream host suite has unrelated intermittent failures. Exact final
 revision results and baseline reproductions must remain part of the handoff.
 Passing retained-feature tests do not make a failed broader suite green.
 
+At host `18167e530b8b0c8784b65c30b4b2f431534933ff`, using Go 1.27.2:
+
+- `go test ./... -count=1 -timeout=240s` failed in
+  `TestWebsocketRetryBindFailureClearsActiveSessionState/Codex_stream` and
+  `TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559`.
+- The affected-package race run failed only in
+  `TestResponsesLateInterruptDoesNotPoisonNextCreate`, without a data-race report.
+- The retained-feature and legacy HTTP/stream regression race selection passed
+  across all six affected packages.
+- Native server builds passed for Linux AMD64 and CGO-enabled ARM64.
+
+The OpenAI compatibility race and late-interrupt failures reproduced on the
+untouched host baseline. The retry-bind EOF remains unclassified. Its fixture and
+relevant WebSocket implementation are unchanged, but 1,000 focused baseline
+iterations passed. That is not proof of a pre-existing failure and it must not be
+reported as one. Earlier runs also reproduced baseline Codex/XAI keepalive upload
+failures. No unrelated tests or provider code were changed to hide these results.
+
+The bounded retry-bind baseline check used a fresh archive of
+`5fc580b1d72d87a7bcfe5cfb6f479c1aea5625b3` with this command:
+
+```sh
+go test -json ./internal/runtime/executor \
+  -run '^TestWebsocketRetryBindFailureClearsActiveSessionState$/^Codex_stream$' \
+  -count=1000 -timeout=120s
+```
+
+It recorded exactly 1,000 target-subtest passes and zero failures. The final-model
+compatibility failure reproduced in the same baseline with:
+
+```sh
+go test ./sdk/cliproxy \
+  -run '^TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559$' \
+  -count=50 -timeout=120s
+```
+
 The native integration's `--race` instruments CPA only. Separately instrumenting
 both loaded Go runtimes failed ThreadSanitizer allocation before a test could run.
 The plugin's package-level race suite passes independently. No cross-runtime race
