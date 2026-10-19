@@ -191,6 +191,7 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 				}
 				if !available || args.ProviderIdentifier != "" && args.ProviderIdentifier != toolProvider {
 					rejectedTools++
+					e.logToolRejection(b, exec, rejectedTools, "refused")
 					if rejectedTools > maxRejectedToolCalls {
 						return done(r, errors.New("Cursor repeatedly requested unavailable tools; no client operation was performed"))
 					}
@@ -222,6 +223,7 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 			}
 			if exec.GetRequestContextArgs() == nil && exec.GetMcpStateExecArgs() == nil {
 				rejectedTools++
+				e.logToolRejection(b, exec, rejectedTools, "refused")
 				if rejectedTools > maxRejectedToolCalls {
 					return done(r, errors.New("Cursor repeatedly requested disabled native tools; no native operation was performed"))
 				}
@@ -236,9 +238,11 @@ func (e *Executor) run(ctx context.Context, req pluginapi.ExecutorRequest, b *bu
 		case *pb.AgentServerMessage_InteractionQuery:
 			reply, err := interactionReply(m.InteractionQuery, b.tools)
 			if err != nil {
+				e.logToolRejection(b, m.InteractionQuery, rejectedTools+1, "unsupported")
 				return done(r, err)
 			}
 			rejectedTools++
+			e.logToolRejection(b, m.InteractionQuery, rejectedTools, "refused")
 			if rejectedTools > maxRejectedToolCalls {
 				return done(r, errors.New("Cursor repeatedly requested unsupported interactions; no approval or answer was provided"))
 			}
