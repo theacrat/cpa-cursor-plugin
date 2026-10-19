@@ -3,6 +3,7 @@ package cursor
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var labelAnnotation = regexp.MustCompile(`\s*(\([^()]*\)|\[[^\[\]]*\])$`)
@@ -12,6 +13,7 @@ var labelContext = regexp.MustCompile(`(?i)^(?:(?:context(?: window)?|window)\s*
 var labelContextSuffix = regexp.MustCompile(`(?i)\s+(?:[0-9][0-9,.]*\s*[km](?:\s*(?:tokens?|context(?: window)?))?|[0-9][0-9,]*\s+tokens?)$`)
 
 func familyDisplayName(label string, hasControls bool) string {
+	label = strings.TrimFunc(label, func(value rune) bool { return unicode.IsSpace(value) || value == '\u200b' || value == '\ufeff' })
 	label = strings.Join(strings.Fields(label), " ")
 	var annotations []string
 	for {
