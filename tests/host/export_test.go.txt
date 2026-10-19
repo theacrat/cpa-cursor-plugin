@@ -9,6 +9,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	pb "github.com/theacrat/cpa-cursor-plugin/internal/proto"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 func TestExportHostFixture(t *testing.T) {
@@ -57,8 +58,11 @@ func TestRestoreHostModelListMetadata(t *testing.T) {
 	metadata := modelWireNumber(modelWireString(nil, 1, "review-gpt"), 15, 200000)
 	metadata = modelWireNumber(metadata, 10, 1)
 	metadata = modelWireNumber(metadata, 5, 1)
-	fast := modelWireNumber(modelWireString(nil, 1, "review-gpt-fast"), 15, 100000)
-	discoverMetadata(t, e, "metadata-account", "", hostLabelRows(), availableFixture(metadata, fast))
+	for _, slug := range []string{"review-gpt-low-fast", "review-gpt-high-fast"} {
+		variant := contextVariantFixture(slug, "100k", false)
+		metadata = protowire.AppendBytes(protowire.AppendTag(metadata, 30, protowire.BytesType), variant)
+	}
+	discoverMetadata(t, e, "metadata-account", "", hostLabelRows(), availableFixture(metadata, modelWireString(nil, 1, "review-gpt-low-fast"), modelWireString(nil, 1, "review-gpt-high-fast")))
 	response, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: mustReadHostFixture(t, os.Getenv("CPA_MODEL_LIST_FIXTURE")), StatusCode: 200})
 	if err != nil {
 		t.Fatal(err)

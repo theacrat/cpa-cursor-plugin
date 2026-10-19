@@ -65,6 +65,14 @@ Variant field 11 is an optional legacy slug, while field 3 marks max mode. Field
 is a representation string, not an authoritative routing ID, and is not used for
 matching. The descriptor does not expose an output-token limit, so none is invented.
 
+Variant field 1 contains parameters whose fields 1 and 2 are the parameter ID and
+value. An explicit `context` value supplies that variant's context size. Repeated
+associations from the same model use the smallest known limit because a legacy
+slug can describe several context/mode combinations. Associations from different
+models remain ambiguous. Explicit exact context values take precedence, including
+zero. A legacy exact row without a context field does not erase its explicit
+parent-variant association. No standard-to-fast fallback is inferred.
+
 Text output and client MCP tool handling are implemented by this executor, but
 tool support is advertised only when Cursor reports agent support. Named reasoning
 controls come from usable variants. A discovered `-thinking` variant maps to the
