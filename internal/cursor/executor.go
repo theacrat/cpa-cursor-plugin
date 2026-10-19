@@ -31,6 +31,8 @@ type Executor struct {
 	variantFetches map[string]*variantFetch
 	modelMu        sync.Mutex
 	modelSnapshots map[string]modelSnapshot
+	liveMu         sync.Mutex
+	live           map[string]*liveSession
 	// Log receives one diagnostic line per completed run; nil disables it.
 	// It carries timings and byte counts only, never credentials or bodies.
 	Log func(string)
@@ -86,6 +88,21 @@ func (e *Executor) Close() {
 		cancel()
 	}
 	e.mu.Unlock()
+	e.liveMu.Lock()
+	sessions := make([]*liveSession, 0, len(e.live))
+	for _, session := range e.live {
+		sessions = append(sessions, session)
+	}
+	clear(e.live)
+	e.liveMu.Unlock()
+	for _, session := range sessions {
+		session.cancel()
+	}
+	for _, session := range sessions {
+		session.mu.Lock()
+		session.close()
+		session.mu.Unlock()
+	}
 	e.wg.Wait()
 	e.modelMu.Lock()
 	clear(e.modelSnapshots)
