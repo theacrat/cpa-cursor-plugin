@@ -73,6 +73,6 @@ machine, before the fixture could run. Plugin concurrency is checked separately
 by `mise run check`, not claimed as cross-runtime race coverage.
 
 `python3 -I scripts/check-retained-host-mutations.py <host-checkout>` verifies that
-the retained audit privacy regression rejects a mutation restoring response-body
-capture in error-only mode. It uses a disposable overlay and does not edit host
-source files.
+the retained audit regressions reject mutations restoring response-body capture
+in error-only mode and uncancellable pooled Home submission. It uses disposable
+overlays and does not edit host source files.

@@ -12,6 +12,10 @@ Production remains on Cursor plugin revision
 
 ## verified behaviour
 
+Last native integration: host `04d02ccaeaf2f72523ec53e50b30a6c55a3032c7`,
+plugin `03bb3c8b0833fe57c7723477546e16160d8b210e`, provider hook
+`3c3c486f13c092d8b05c21e31a92c638492acb61`.
+
 - Retain one upstream Run through multiple client-owned tool rounds.
 - Collect every call in a 250 ms burst and correlate each result with its exact
   upstream execution identity.
@@ -55,6 +59,23 @@ is skipped or disabled to obtain a passing feature result.
 The full upstream host suite has unrelated intermittent failures. Exact final
 revision results and baseline reproductions must remain part of the handoff.
 Passing retained-feature tests do not make a failed broader suite green.
+
+At the current host checkpoint
+`04d02ccaeaf2f72523ec53e50b30a6c55a3032c7`, using Go 1.27.2:
+
+- The full suite failed in `TestResponsesInterruptStopsHTTPUpstream` and
+  `TestPutOpenAICompatConcurrentWithAuthFieldsPatch_Issue6559`.
+- The full affected-package race suite failed only in
+  `TestResponsesInterruptStopsHTTPUpstream`. No data-race report appeared.
+- Both failures also reproduced on the untouched baseline. All retained-feature
+  race checks and the native nine-case integration passed.
+- Production server builds passed for Linux AMD64 and CGO-enabled ARM64.
+
+The production audit finaliser now accepts lifecycle cancellation. Its real Home
+submission fixture proves that cancellation closes only the operation-owned
+connection, releases spools/reservations and leaves the shared Home client usable.
+Ordinary filesystem syscalls cannot be forcibly interrupted. Cancellation is
+checked before and between operations without abandoning an I/O goroutine.
 
 At host `18167e530b8b0c8784b65c30b4b2f431534933ff`, using Go 1.27.2:
 
@@ -104,6 +125,7 @@ without separately authorised live inference.
 
 ## remaining final gate
 
-The production audit finaliser's lifecycle-cancellation fix must be integrated,
-independently reviewed and verified at the final host revision before this record
-is marked complete.
+The production audit finaliser's lifecycle-cancellation fix is integrated and its
+checks pass. Independent review of that last patch remains pending. The broad
+host suite is not green, so this is not a deployment-ready or live-compatibility
+claim.
