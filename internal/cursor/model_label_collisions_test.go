@@ -18,12 +18,13 @@ func TestModelListLabelsOnlyQualifyDuplicates(t *testing.T) {
 		{"unique", `{"data":[{"id":"cursor/model","owned_by":"cursor","name":"Model 1M Low (NO ZDR) (Cursor)"}]}`, []string{"Model"}},
 		{"unique fast", `{"data":[{"id":"cursor/model-fast","owned_by":"cursor"}]}`, []string{"Model"}},
 		{"speed tiers", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model-fast","owned_by":"cursor"}]}`, []string{"Model", "Model (Fast)"}},
-		{"another provider", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":"Model"}]}`, []string{"Model (Cursor)", "Model"}},
-		{"display name collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/other","owned_by":"native","display_name":"Model"}]}`, []string{"Model (Cursor)", ""}},
-		{"normalised collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":" model "}]}`, []string{"Model (Cursor)", " model "}},
-		{"provider without label", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native"}]}`, []string{"Model (Cursor)", ""}},
-		{"provider and tiers", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model-fast","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":"Model"}]}`, []string{"Model (Cursor)", "Model (Fast)", "Model"}},
-		{"fast provider collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model-fast","owned_by":"cursor"},{"id":"native/fast","owned_by":"native","name":"Model (Fast)"}]}`, []string{"Model", "Model (Fast) (Cursor)", "Model (Fast)"}},
+		{"another provider", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":"Model"}]}`, []string{"Model (cursor)", "Model"}},
+		{"display name collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/other","owned_by":"native","display_name":"Model"}]}`, []string{"Model (cursor)", ""}},
+		{"normalised collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":" model "}]}`, []string{"Model (cursor)", " model "}},
+		{"provider without label", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"native/model","owned_by":"native"}]}`, []string{"Model (cursor)", ""}},
+		{"provider and tiers", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model-fast","owned_by":"cursor"},{"id":"native/model","owned_by":"native","name":"Model"}]}`, []string{"Model (cursor)", "Model (Fast)", "Model"}},
+		{"fast provider collision", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model-fast","owned_by":"cursor"},{"id":"native/fast","owned_by":"native","name":"Model (Fast)"}]}`, []string{"Model", "Model (Fast) (cursor)", "Model (Fast)"}},
+		{"legacy provider casing", `{"data":[{"id":"cursor/model","owned_by":"cursor","name":"Model (Cursor)","display_name":"Model (Cursor)"},{"id":"native/model","owned_by":"native","name":"Model"}]}`, []string{"Model (cursor)", "Model"}},
 		{"same model repeated", `{"data":[{"id":"cursor/model","owned_by":"cursor"},{"id":"cursor/model","owned_by":"cursor"}]}`, []string{"Model", "Model"}},
 		{"custom", `{"data":[{"id":"cursor/model","owned_by":"cursor","name":"my custom 1M (NO ZDR)","display_name":"personal"}]}`, []string{"my custom 1M (NO ZDR)"}},
 		{"null names", `{"data":[{"id":"cursor/model","owned_by":"cursor","name":null,"display_name":null}]}`, []string{""}},
@@ -71,7 +72,8 @@ func TestModelListCodexLabelsOnlyQualifyVisibleDuplicates(t *testing.T) {
 	}{
 		{`{"models":[{"slug":"cursor/model-fast","display_name":"Model 1M Low (Fast) (Cursor) (NO ZDR)"}]}`, []string{"Model"}},
 		{`{"models":[{"slug":"cursor/model"},{"slug":"cursor/model-fast"}]}`, []string{"Model", "Model (Fast)"}},
-		{`{"models":[{"slug":"cursor/model"},{"slug":"other/model","display_name":"Model"}]}`, []string{"Model (Cursor)", "Model"}},
+		{`{"models":[{"slug":"cursor/model"},{"slug":"other/model","display_name":"Model"}]}`, []string{"Model (cursor)", "Model"}},
+		{`{"models":[{"slug":"cursor/model","display_name":"Model (Cursor)"},{"slug":"other/model","display_name":"Model"}]}`, []string{"Model (cursor)", "Model"}},
 	} {
 		response, err := e.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: []byte(tc.body)})
 		if err != nil {

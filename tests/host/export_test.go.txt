@@ -82,7 +82,7 @@ func TestRestoreHostModelListMetadata(t *testing.T) {
 			continue
 		}
 		found = true
-		if row["context_length"] != float64(200000) || row["tool_call"] != true || row["reasoning"] != true || row["modalities"] == nil || row["display_name"] != "Review GPT (Cursor)" {
+		if row["context_length"] != float64(200000) || row["tool_call"] != true || row["reasoning"] != true || row["modalities"] == nil || row["display_name"] != "Review GPT (cursor)" {
 			t.Fatalf("host list metadata missing: %v", row)
 		}
 	}

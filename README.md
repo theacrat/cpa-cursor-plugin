@@ -56,7 +56,7 @@ prefixes for other accounts that have one.
 This is a breaking change: saved configs must switch to `cursor/<id>`.
 
 Unique picker labels use only the model family name, without effort words,
-context sizes or NO ZDR annotations. `(Fast)` and `(Cursor)` appear only when
+context sizes or NO ZDR annotations. `(Fast)` and `(cursor)` appear only when
 needed to distinguish duplicate names in the returned catalogue, with the route ID
 as a last resort. Discovered fast tiers remain separate `cursor/<id>-fast` models,
 each with its own thinking selector, even when only one tier is visible. Structured

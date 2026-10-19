@@ -66,7 +66,7 @@ unstripped, so `claude-opus-4-8(high)` works end to end with no host changes.
   only answer in text through this executor.
 - Display names remove recognised effort, context-size, provider and NO ZDR
   annotations. Unique visible names have no added qualifiers. Duplicate names gain
-  `(Fast)`, then `(Cursor)`, then a route ID only as needed. Filtering a duplicate
+  `(Fast)`, then `(cursor)`, then a route ID only as needed. Filtering a duplicate
   out of the returned catalogue removes the unnecessary qualifier. Custom names
   and structured metadata remain unchanged.
 

@@ -92,7 +92,7 @@ func (e *Executor) modelListLabels(rows []json.RawMessage, idKey string) []model
 						entry.labels[fieldIndex] += " (Fast)"
 					}
 				case "provider":
-					entry.labels[fieldIndex] += " (Cursor)"
+					entry.labels[fieldIndex] += " (cursor)"
 				case "route":
 					entry.labels[fieldIndex] += " [" + entry.id + "]"
 				}
