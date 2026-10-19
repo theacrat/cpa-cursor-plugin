@@ -69,6 +69,30 @@ is invented. Unknown shapes and VM setup remain fail-closed, and interaction
 refusals share the existing retry bound. The stored failures do not identify the
 exact query subtype, so live Composer acceptance is not claimed.
 
+## Grok skill follow-up
+
+The later Grok 4.6 session `ses_ead01bc29ffedg5XVnuUniEin4` completed its four
+skill loads and reached file operations before the linked step was interrupted.
+Ten skill calls across the four scoped sessions completed with valid arguments
+and non-empty results. Their tool-call IDs contained literal newlines and exceeded
+64 bytes, while the four observed Sol skill-call IDs did not.
+
+The inspected reference `yobo2u/omsub`, branch `cursor`, commit
+`c43af3c564d444067401e013a74f7a1ec35549a8`, normalises the same composite ID
+shape. This supports output-boundary hardening rather than changing skill files,
+discarding skill results or flattening the structured conversation. A redacted
+OpenChamber timeline without exception messages or stack traces does not prove
+that these IDs caused its renderer errors. Native-tool rediscovery claims and
+interrupted model steps remain separate from successful client skill execution.
+
+Newly emitted tool-call IDs preserve ASCII letters, digits, underscores and
+hyphens up to 64 bytes. Other upstream IDs become deterministic 48-character
+`call_` IDs using the SHA-256 digest of the complete original value, encoded as
+base64url. Missing IDs retain the fresh-ID fallback. Existing transcript IDs are
+never rewritten, and a new public ID matching historical calls is rejected with
+a fixed error rather than risking result misassociation. Skill content and tool
+arguments remain unchanged in both response modes and full conversation replay.
+
 ## verification boundary
 
 Local TLS HTTP/2 fixtures exercise native refusal followed by a real client-tool
