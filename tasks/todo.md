@@ -49,12 +49,21 @@
 
 ## L06: plugin retained-host adapter
 
+- [x] Negotiate lifecycle capability and host-owned per-execution eligibility.
+- [x] Retain scoped HTTP ownership without changing legacy callbacks.
+- [x] Review malformed/cancelled acquisition cleanup and mismatched attachment IDs.
+
 - Acceptance: negotiated host capability exposes a retained client to the executor.
   Unsupported hosts use stateless execution without omitting callback identity.
 - Verify: native C ABI capability/absence/cancellation fixtures and full build.
 - Likely modules: native host adapter, dispatch request decoding, ABI fixtures.
 
 ## L07: conversation identity and result correlation
+
+- [x] Use the actual session, caller and account, never affinity identity.
+- [x] Validate complete newest batches before sending any correlated results.
+- [x] Repair omitted final call lists only with stored pending proof.
+- [x] Preserve semantically equivalent JSON argument replay and selected-team isolation.
 
 - Acceptance: actual session plus caller/account owns a run. Only its newest
   pending batch can consume results. Duplicate/conflicting results are rejected.
@@ -73,6 +82,10 @@
 
 ## L08: one live tool round trip
 
+- [x] Local protocol fixtures prove the same upstream Run across multiple rounds.
+- [x] Real native host fixture passed buffered and streaming round trips at the
+  initial host checkpoint. Repeat after host review fixes before final handoff.
+
 - Acceptance: client receives a tool call while upstream remains alive, then the
   next client request sends the actual result to that same upstream execution.
 - Verify: two-request local TLS/host fixture proves one upstream Run, no original
@@ -81,10 +94,13 @@
 
 ## checkpoint B
 
-- [ ] Independent same-run and callback-lifetime review is clean.
-- [ ] No new native execution, fabricated approval or direct transport bypass.
+- [x] Independent plugin same-run and callback-lifetime review is clean.
+- [x] No new native execution, fabricated approval or direct transport bypass.
 
 ## L09: batch collection
+
+- [x] Deterministic fixtures cover multiple calls, late debounce resets and interruption.
+- [x] Impossible replay batches fail before executable calls reach the client.
 
 - Acceptance: collect a 250 ms burst, return every distinct call once, preserve
   execution mapping and distinguish response closure from a genuine interruption.
@@ -92,6 +108,10 @@
 - Likely modules: run event handling, batch timer, protocol tests.
 
 ## L10: safe dead-stream recovery
+
+- [x] Recover eligible dead streams from complete verified caller history.
+- [x] Keep permission/quota failures terminal and reject divergent recovered output.
+- [x] Preserve completed results without reinjecting historical batches.
 
 - Acceptance: recovery retains completed results without re-running client tools,
   consuming foreign state or hiding uncertain delivery. Invalid state fails.
@@ -101,6 +121,10 @@
 
 ## L11: progress and resource bounds
 
+- [x] Phase budgets, shared recovery limits and 1/2/4-second backoff are tested.
+- [x] Deterministic expiry, capacity, retained-byte and construction-shutdown tests pass.
+- [x] Guard mutations are rejected without modifying source files.
+
 - Acceptance: phase budgets, safe recovery/backoff limits, parked expiry and
   capacity/blob ceilings are finite. Heartbeats/repeated prefixes are not progress.
 - Verify: deterministic clocks, admission pressure, no-progress mutations, race
@@ -108,6 +132,10 @@
 - Likely modules: watchdog, parked registry, configuration bounds, tests.
 
 ## L12: final integration
+
+- [x] Actual native plugin retains stateless execution on the unmodified v8.0.29 host.
+- [x] Provider purpose propagation is independently reviewed and fully checked.
+- [ ] Integrate and independently review host flush, logging and nested-binding fixes.
 
 - [ ] Old-host fallback and new-host multi-round/batched loops pass end to end.
 - [ ] Reference-visible semantics and intentional safety differences documented.
