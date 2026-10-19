@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -606,6 +607,18 @@ func (s *liveSession) results(payload []byte) ([]*pb.AgentClientMessage, error) 
 }
 
 func canonicalLiveMessage(message chatMessage) chatMessage {
+	message.ToolCalls = append([]toolCall(nil), message.ToolCalls...)
+	for index := range message.ToolCalls {
+		var arguments map[string]any
+		decoder := json.NewDecoder(strings.NewReader(message.ToolCalls[index].Function.Arguments))
+		decoder.UseNumber()
+		if json.Valid([]byte(message.ToolCalls[index].Function.Arguments)) && decoder.Decode(&arguments) == nil && arguments != nil {
+			canonical, err := json.Marshal(arguments)
+			if err == nil {
+				message.ToolCalls[index].Function.Arguments = string(canonical)
+			}
+		}
+	}
 	text, images, err := content(message.Content)
 	if err == nil && len(images) == 0 {
 		message.Content, _ = json.Marshal(text)

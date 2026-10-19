@@ -200,3 +200,22 @@ func TestLiveResultMessagesMatchStoredCallsByIDAndReturnPendingOrder(t *testing.
 		t.Fatalf("stored-call ordering changed ownership: %v", err)
 	}
 }
+
+func TestLiveResultMessagesAcceptReserialisedEquivalentArguments(t *testing.T) {
+	expected, pending := liveHistoryFixture()
+	expected[len(expected)-1].ToolCalls[0].Function.Arguments = `{"command":"printf \u003cvalue\u003e","flag":true}`
+	pending[0].call = expected[len(expected)-1].ToolCalls[0]
+	messages := append([]chatMessage(nil), expected...)
+	messages[len(messages)-1].ToolCalls = append([]toolCall(nil), expected[len(expected)-1].ToolCalls...)
+	messages[len(messages)-1].ToolCalls[0].Function.Arguments = `{ "flag": true, "command": "printf <value>" }`
+	for _, item := range pending {
+		messages = append(messages, chatMessage{Role: "tool", ToolCallID: item.call.ID, Content: json.RawMessage(`"result"`)})
+	}
+	if _, err := liveResultMessages(expected, pending, liveHistoryPayload(t, messages)); err != nil {
+		t.Fatalf("JSON reserialization changed pending ownership: %v", err)
+	}
+	messages[len(expected)-1].ToolCalls[0].Function.Arguments = `{"command":"different","flag":true}`
+	if _, err := liveResultMessages(expected, pending, liveHistoryPayload(t, messages)); err == nil {
+		t.Fatal("semantic argument change was accepted")
+	}
+}
