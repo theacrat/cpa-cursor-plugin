@@ -56,7 +56,14 @@ func (p liveProgress) expired(now time.Time) bool {
 }
 
 func (p *liveProgress) recover(now time.Time) (time.Duration, bool) {
-	if !p.expired(now) || p.recoveries >= 3 || p.visible && p.afterVisible >= 1 {
+	if !p.expired(now) {
+		return 0, false
+	}
+	return p.claimRecovery(now)
+}
+
+func (p *liveProgress) claimRecovery(now time.Time) (time.Duration, bool) {
+	if p.recoveries >= 3 || p.visible && p.afterVisible >= 1 {
 		return 0, false
 	}
 	delay := time.Second << p.recoveries

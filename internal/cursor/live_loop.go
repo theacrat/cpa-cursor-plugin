@@ -33,7 +33,7 @@ type liveRetry struct {
 func (e *liveRetry) Error() string { return e.message }
 
 func recoverableLiveTransport(err error) bool {
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "Cursor host stream closed" || err.Error() == "Cursor RunSSE stream failed"
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 type liveSession struct {
@@ -60,6 +60,8 @@ type liveSession struct {
 	terminalErr       error
 	retainedBytes     atomic.Int64
 	generation        atomic.Uint64
+	replayBytes       int
+	pendingBytes      int
 }
 
 func (s *liveSession) close() {
@@ -119,16 +121,16 @@ func (e *Executor) liveSession(requestCtx context.Context, req pluginapi.Executo
 	for _, candidate := range e.live {
 		retained += candidate.retainedBytes.Load()
 	}
-	if retained+int64(b.blobs.size) > 256<<20 {
+	if retained+int64(b.blobs.size+len(req.Payload)) > 256<<20 {
 		e.liveMu.Unlock()
 		return nil, false, errors.New("Cursor retained blob capacity is full")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stopRequest := context.AfterFunc(requestCtx, cancel)
 	defer stopRequest()
-	session = &liveSession{owner: owner, compatible: compatible, built: b, ctx: ctx, cancel: cancel, frames: make(chan liveFrame, 1), done: make(chan struct{}), last: time.Now()}
+	session = &liveSession{owner: owner, compatible: compatible, built: b, ctx: ctx, cancel: cancel, frames: make(chan liveFrame, 1), done: make(chan struct{}), last: time.Now(), replayBytes: len(req.Payload)}
 	session.mu.Lock()
-	session.retainedBytes.Store(int64(b.blobs.size))
+	session.retainedBytes.Store(int64(b.blobs.size + len(req.Payload)))
 	e.live[owner] = session
 	e.liveMu.Unlock()
 	if err := requestCtx.Err(); err != nil {
@@ -218,6 +220,34 @@ func (e *Executor) retireLive(s *liveSession) {
 	e.liveMu.Unlock()
 	s.closed = true
 	s.close()
+}
+
+func (e *Executor) updateLiveRetained(s *liveSession) error {
+	e.liveMu.Lock()
+	defer e.liveMu.Unlock()
+	next := int64(s.built.blobs.size + s.replayBytes + s.pendingBytes)
+	var retained int64
+	for _, candidate := range e.live {
+		if candidate == s {
+			continue
+		}
+		retained += candidate.retainedBytes.Load()
+	}
+	if retained+next > 256<<20 {
+		return errors.New("Cursor retained blob capacity is full")
+	}
+	s.retainedBytes.Store(next)
+	return nil
+}
+
+func liveReplayBudget(s *liveSession, result runResult) error {
+	message := chatMessage{Role: "assistant", Content: json.RawMessage(`""`), Reasoning: result.thinking, ToolCalls: result.calls}
+	message.Content, _ = json.Marshal(result.text)
+	raw, err := json.Marshal(message)
+	if err != nil || s.replayBytes+len(raw)+(64<<10) > maxFrame {
+		return errors.New("Cursor client tool batch exceeds replay limit")
+	}
+	return nil
 }
 
 func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration, host RetainedHTTPHost) (runResult, error) {
@@ -342,7 +372,10 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 			}
 			stopCancel()
 			e.retireLive(session)
-			return result, &liveRetry{delay: time.Second, message: "Cursor parked stream closed before result continuation"}
+			if delay, ok := progress.claimRecovery(time.Now()); ok {
+				return result, &liveRetry{delay: delay, message: "Cursor parked stream closed before result continuation"}
+			}
+			return result, errors.New("Cursor live recovery limit exceeded")
 		}
 		attached, attachErr := host.AttachScope(ctx, session.scope.ID())
 		if attachErr != nil {
@@ -355,6 +388,11 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 			}
 		}
 		session.pending = nil
+		session.pendingBytes = 0
+		session.replayBytes = len(req.Payload)
+		if err := e.updateLiveRetained(session); err != nil {
+			return result, err
+		}
 		session.parked = false
 		session.rejections = 0
 		progress.resumed = true
@@ -384,16 +422,25 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 				return result, errors.New("Cursor live stream stalled without forward progress")
 			}
 		case <-batch:
+			if err := liveReplayBudget(session, result); err != nil {
+				return result, err
+			}
+			expected, historyErr := liveExpectedHistory(req.Payload, result)
+			if historyErr != nil {
+				return result, historyErr
+			}
+			rawHistory, _ := json.Marshal(expected)
+			session.replayBytes = len(rawHistory)
+			if err := e.updateLiveRetained(session); err != nil {
+				return result, err
+			}
 			if parkErr := session.scope.PreparePark(ctx); parkErr != nil {
 				return result, parkErr
 			}
 			if !stopCancel() && ctx.Err() != nil {
 				return result, ctx.Err()
 			}
-			session.expected, err = liveExpectedHistory(req.Payload, result)
-			if err != nil {
-				return result, err
-			}
+			session.expected = expected
 			session.parked = true
 			session.last = time.Now()
 			epoch := session.generation.Add(1)
@@ -414,7 +461,10 @@ func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorReq
 					if recoverableLiveTransport(frame.err) {
 						stopCancel()
 						e.retireLive(session)
-						return result, &liveRetry{delay: time.Second, message: "Cursor retained stream closed during result continuation"}
+						if delay, ok := progress.claimRecovery(time.Now()); ok {
+							return result, &liveRetry{delay: delay, message: "Cursor retained stream closed during result continuation"}
+						}
+						return result, errors.New("Cursor live recovery limit exceeded")
 					}
 				}
 				if errors.Is(frame.err, io.EOF) {
@@ -484,7 +534,17 @@ func (e *Executor) handleLiveExec(s *liveSession, b *builtRequest, exec *pb.Exec
 			if len(s.pending) >= 64 {
 				return errors.New("Cursor client tool batch exceeds limit")
 			}
-			s.pending = append(s.pending, livePending{call: call, exec: exec})
+			candidate := *result
+			candidate.calls = append(append([]toolCall(nil), result.calls...), call)
+			if err := liveReplayBudget(s, candidate); err != nil {
+				return err
+			}
+			identity := &pb.ExecServerMessage{Id: exec.Id, ExecId: exec.ExecId}
+			s.pendingBytes += len(raw) + len(id) + len(name) + proto.Size(identity)
+			if err := e.updateLiveRetained(s); err != nil {
+				return err
+			}
+			s.pending = append(s.pending, livePending{call: call, exec: identity})
 			result.calls = append(result.calls, call)
 			return nil
 		}
@@ -610,7 +670,7 @@ func (e *Executor) handleLiveFrame(s *liveSession, b *builtRequest, message *pb.
 				e.liveMu.Unlock()
 				return false, err
 			}
-			s.retainedBytes.Store(int64(s.built.blobs.size))
+			s.retainedBytes.Store(int64(s.built.blobs.size + s.replayBytes + s.pendingBytes))
 			e.liveMu.Unlock()
 			reply.Message = &pb.KvClientMessage_SetBlobResult{SetBlobResult: &pb.SetBlobResult{}}
 		default:

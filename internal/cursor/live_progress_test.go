@@ -175,3 +175,22 @@ func TestLiveProgressRestartPreservesOriginAndDoesNotRestoreRecoveries(t *testin
 		t.Fatal("restart or fresh reasoning restored exhausted recoveries")
 	}
 }
+
+func TestLiveProgressTransportAndStallShareOneRecoveryBudget(t *testing.T) {
+	now := time.Unix(1000, 0)
+	progress := newLiveProgress(now, true)
+	if delay, ok := progress.claimRecovery(now); !ok || delay != time.Second {
+		t.Fatal("transport recovery did not claim the first attempt")
+	}
+	now = now.Add(progress.budget())
+	if delay, ok := progress.recover(now); !ok || delay != 2*time.Second {
+		t.Fatal("stall reset the transport recovery backoff")
+	}
+	progress.observe(now, "visible", false)
+	if delay, ok := progress.claimRecovery(now); !ok || delay != 4*time.Second {
+		t.Fatal("transport recovery reset accumulated backoff")
+	}
+	if _, ok := progress.claimRecovery(now); ok {
+		t.Fatal("transport errors exceeded the shared recovery cap")
+	}
+}

@@ -29,6 +29,7 @@ type liveFixtureScope struct {
 	duplicateExec                  bool
 	rounds                         int
 	firstResult                    *pb.McpResult
+	arguments                      map[string][]byte
 }
 
 func (h *liveFixtureHost) SupportsRetainedHTTP() bool                           { return true }
@@ -92,7 +93,7 @@ func (s *liveFixtureScope) Do(_ context.Context, req pluginapi.HTTPRequest) (plu
 			if s.duplicateExec {
 				execID = 7
 			}
-			frame, _ := frameMessage(&pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: execID, ExecId: "upstream-exec", Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ProviderIdentifier: "cpa", ToolCallId: fmt.Sprintf("upstream\ncall%d", index)}}}}})
+			frame, _ := frameMessage(&pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: execID, ExecId: "upstream-exec", Message: &pb.ExecServerMessage_McpArgs{McpArgs: &pb.McpArgs{ToolName: "mcp_cpa_lookup", ProviderIdentifier: "cpa", ToolCallId: fmt.Sprintf("upstream\ncall%d", index), Args: s.arguments}}}}})
 			s.chunks <- pluginapi.HTTPStreamChunk{Payload: frame}
 		}
 	} else if result := m.GetExecClientMessage(); result != nil && result.GetMcpResult() != nil {
