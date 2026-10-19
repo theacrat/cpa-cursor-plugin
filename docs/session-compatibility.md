@@ -10,9 +10,10 @@ alone cannot prove the client catalogue was missing.
 The second reported session `ses_eb46c55dfffekif88EzQqKMN1z` records Cursor Opus
 returning HTTP 429 at `msg_1515a4cdd001u4Eyh5biROGIu8`. After switching to the
 opencode-go Grok route, compaction returned HTTP 403 with `plugin call failed` at
-`msg_1515f7c11001f3L3CrAqXFtZMN`. The compaction error was not produced by this
-Cursor executor. Quota, eligibility and bridge protocol failures must remain
-separate diagnoses.
+`msg_1515f7c11001f3L3CrAqXFtZMN`. The compaction row has no model field, but the
+preceding switch and OpenCode's dispatch logic indicate the opencode-go route.
+There is no captured Cursor compaction failure. Quota, eligibility and bridge
+protocol failures must remain separate diagnoses.
 
 ## reproduced bridge defects
 
@@ -30,6 +31,32 @@ summary prompt. The speculative input relaxation was removed. Faithful fixtures
 now retain historical exchanges, preserve the final summary prompt and do not
 re-expose tools missing from the current catalogue. Assistant prefills remain
 unsupported, rather than being silently reinterpreted as summaries.
+
+## cumulative review corrections
+
+Shared discovery no longer propagates a cancelled fetch owner's context error to
+other live requests. A live waiter can become the replacement owner with its own
+host request. An upstream failure or the discovery request's own timeout still
+propagates without a retry loop.
+
+Thinking metadata distinguishes the selected bare/default route from a marker on
+another variant. A marked thinking variant no longer hides a valid off/high toggle
+when the bare route itself is unmarked.
+
+Catalogue filtering removes discovery-generated model-ID qualifiers when their
+duplicates are no longer visible, while preserving unrelated custom suffixes.
+
+Tool identities are reserved across the union of historical and current original
+function names. A historical-only tool remains distinct from a differently named
+current tool even when their normalised aliases would overlap. Only the current
+enabled catalogue enters executable resolution, so replay cannot revive a removed
+tool or dispatch a different function through its old identity.
+
+All four cumulative review findings have regression fixtures and were independently
+re-reviewed after correction. Mutations that disable cancellation re-election,
+restore family-wide thinking suppression, retain obsolete label qualifiers or
+remove historical alias reservations are caught by the tests. No new blocker was
+reported in the integrated review at `85901d1`.
 
 ## verification boundary
 
