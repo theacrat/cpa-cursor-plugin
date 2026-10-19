@@ -1,6 +1,7 @@
 package cursor
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,46 @@ func TestLiveToolLoopIdentityUsesActualSessionAndCaller(t *testing.T) {
 	req.Metadata = map[string]any{}
 	if liveOwner(req) != "" {
 		t.Fatal("unauthenticated caller gained live ownership")
+	}
+}
+
+func TestLiveToolLoopRejectsAmbiguousSessionAndPurposeHeaders(t *testing.T) {
+	for _, headers := range []http.Header{
+		{"X-Opencode-Session-Id": {"first", "second"}, "X-Cpa-Request-Kind": {"primary"}},
+		{"X-Opencode-Session-Id": {"first"}, "x-opencode-session-id": {"first"}, "X-Cpa-Request-Kind": {"primary"}},
+		{"X-Opencode-Session-Id": {"first"}, "X-Cpa-Request-Kind": {"primary", "primary"}},
+		{"X-Opencode-Session-Id": {" first"}, "X-Cpa-Request-Kind": {"primary"}},
+		{"X-Opencode-Session-Id": {"first\nsecond"}, "X-Cpa-Request-Kind": {"primary"}},
+		{"X-Opencode-Session-Id": {strings.Repeat("x", 257)}, "X-Cpa-Request-Kind": {"primary"}},
+	} {
+		req := liveRequest(nil)
+		req.Headers = headers
+		if liveOwner(req) != "" {
+			t.Fatal("ambiguous or invalid identity gained retained ownership")
+		}
+	}
+}
+
+func TestLiveToolLoopCallerAccountAndCredentialCompatibilityAreIsolated(t *testing.T) {
+	req := liveRequest(nil)
+	owner := liveOwner(req)
+	otherAccount := req
+	otherAccount.AuthID = "other-account"
+	if liveOwner(otherAccount) == owner {
+		t.Fatal("different accounts share retained ownership")
+	}
+	req.Metadata["caller_scope"] = strings.Repeat("b", 64)
+	if liveOwner(req) == owner {
+		t.Fatal("different callers share retained ownership")
+	}
+	built, err := buildRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatible := liveCompatibility(req, built)
+	req.StorageJSON = []byte(`{"type":"cursor","access_token":"different-fixture-token"}`)
+	if liveCompatibility(req, built) == compatible {
+		t.Fatal("replaced credentials share retained compatibility")
 	}
 }
 
