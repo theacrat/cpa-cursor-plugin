@@ -11,8 +11,8 @@ Reference revision: `ef3721207a5941454ab281aab2b14f180e7657e6`, version 2.5.1.
 Reference host: CLIProxyAPI v8.0.29, revision
 `5fc580b1d72d87a7bcfe5cfb6f479c1aea5625b3`.
 
-This document is a proposed contract awaiting operator approval. It does not
-authorise deployment, live inference or changes to another repository.
+The operator approved this contract and the CPA host-extension scope. Deployment,
+live inference and unrelated repository changes remain separately authorised.
 
 ## behaviour
 
@@ -77,7 +77,8 @@ Do not bypass the host with a private HTTP client, omit callback identity, creat
 an unscoped background operation or keep client responses open to prevent the
 host from releasing them. Unsupported hosts retain the existing stateless path
 or return an explicit unsupported capability error when live reuse is required.
-Changes to the CPA host require approval before implementation outside this repo.
+The approved CPA host changes are limited to this retained-lifetime contract and
+its verification. They do not permit unrelated host or provider modifications.
 
 Verified host sources at the pinned revision:
 
@@ -135,8 +136,13 @@ adaptation, not replacement of auth, discovery or the plugin with a separate app
 If substantial MIT-licensed implementation is adapted, retain the reference's
 copyright and permission notice with its exact pinned source revision.
 
-## approval required
+## approved scope and remaining gates
 
-Approve this live-loop contract and the scope of a host-owned HTTP lifetime
-extension, or choose a different transport architecture. The host capability and
-stable session identity must be proven before the implementation plan is finalised.
+The live-loop contract and host-owned lifetime extension are approved. The host
+capability and stable session identity must be proven before the implementation
+plan is finalised. Review the ordered implementation plan before coding.
+
+Parked-resource expiry and phase-aware progress watchdogs are intentional,
+feature-specific exceptions to the upstream host's established-network timeout
+convention. They must not add a blanket HTTP timeout, alter unrelated provider
+behaviour or weaken cancellation and unknown-outcome protections.
