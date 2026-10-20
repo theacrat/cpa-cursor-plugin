@@ -201,6 +201,40 @@ func TestMCPToolCallAndTranscriptContinuation(t *testing.T) {
 	}
 }
 
+func TestStatelessToolResultContinuationKeepsHistoryWhenToolsOmitted(t *testing.T) {
+	req := testRequest()
+	req.Payload = []byte(`{"messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Search"},{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"example\"}"}}]},{"role":"tool","tool_call_id":"call-one","content":"found it"}]}`)
+	built, err := buildRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := built.message.GetRunRequest()
+	if run.Action.GetResumeAction() == nil || len(built.tools) != 0 {
+		t.Fatal("omitted-tools continuation invented a catalogue or lost resume")
+	}
+	var root []string
+	for _, id := range run.ConversationState.RootPromptMessagesJson {
+		root = append(root, string(built.blobs.data[hex.EncodeToString(id)]))
+	}
+	joined := strings.Join(root, "\n")
+	for _, want := range []string{"tool-call", "tool-result", "found it", "mcp_cpa_lookup", "Search"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("root prompt missing %s", want)
+		}
+	}
+	turn := &pb.ConversationTurnStructure{}
+	if err := proto.Unmarshal(built.blobs.data[hex.EncodeToString(run.ConversationState.Turns[0])], turn); err != nil {
+		t.Fatal(err)
+	}
+	step := &pb.ConversationStep{}
+	if err := proto.Unmarshal(built.blobs.data[hex.EncodeToString(turn.GetAgentConversationTurn().Steps[0])], step); err != nil {
+		t.Fatal(err)
+	}
+	if step.GetToolCall().GetMcpToolCall().Result.GetSuccess().Content[0].GetText().Text != "found it" {
+		t.Fatal("tool result missing from state")
+	}
+}
+
 func TestStreamAndCloseDrain(t *testing.T) {
 	started := make(chan struct{})
 	_, e := tlsFixture(t, func(w http.ResponseWriter, r *http.Request) {

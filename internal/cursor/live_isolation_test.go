@@ -100,3 +100,32 @@ func TestLiveToolLoopToolResultContinuationKeepsParkedCatalogueWhenToolsOmitted(
 		}
 	})
 }
+
+func TestMissingRequestKindKeepsRetainedHostOnStatelessPath(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8)}
+		fallback := &liveRecoveryScope{liveFixtureScope: &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8)}, text: "old-provider completed", complete: true}
+		host := &liveFallbackHost{liveFixtureHost: &liveFixtureHost{scope: scope}, fallback: fallback}
+		e := NewExecutor(DefaultConfig())
+		warmFixtureVariants(e)
+		defer e.Close()
+		req := liveRequest(host)
+		req.Headers.Del("X-Cpa-Request-Kind")
+		response, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(response.Payload), "old-provider completed") {
+			t.Fatal("old OpenCode provider did not keep the stateless host path")
+		}
+		e.liveMu.Lock()
+		retained := len(e.live)
+		e.liveMu.Unlock()
+		scope.mu.Lock()
+		runs, parks, attaches := scope.runs, scope.parks, scope.attaches
+		scope.mu.Unlock()
+		if retained != 0 || runs != 0 || parks != 0 || attaches != 0 {
+			t.Fatalf("missing purpose opened a live run retained=%d runs=%d parks=%d attaches=%d", retained, runs, parks, attaches)
+		}
+	})
+}
