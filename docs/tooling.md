@@ -47,32 +47,3 @@ contract and how to smoke-test an existing shared library.
 under `.scratch`, including provider registry separation, API-key refresh scheduling
 and native thinking translation. It does not modify the dependency cache or use
 live credentials.
-
-`python3 -I scripts/check-live-mutations.py` applies isolated Go overlays to four
-live-loop guards and verifies that the targeted regressions fail. It checks
-repeated-prefix progress, earlier history ownership, actual session identity and
-upstream execution identity. Source files are not modified. Disposable overlays
-are created under `.scratch` and removed after each check.
-
-`python3 -I scripts/check-live-host.py <host-checkout>` snapshots committed host
-and plugin revisions, builds the real native library, then runs the live-loop
-fixture through CPA's auth manager and Gin chat-completions handler. The host must
-descend from the pinned v8.0.29 baseline. The fixture expects the retained HTTP
-extension, so the unmodified baseline intentionally fails. Both buffered and
-streaming requests must retain exactly one upstream Run, return a real tool result
-to its execution identity and preserve complete skill content. The only network
-traffic is the fixture's randomly allocated loopback server. Dependency downloads
-are disabled and disposable source/build copies are removed after the run.
-Add `--expect-stateless` when verifying the unmodified host baseline. Both primary
-response modes must then close their upstream run normally without probing any
-retained callback.
-Add `--race` to instrument the host fixture with Go's race detector. The native
-library remains a normal shared build. Loading separately race-instrumented Go
-runtimes together failed during ThreadSanitizer allocation on the verification
-machine, before the fixture could run. Plugin concurrency is checked separately
-by `mise run check`, not claimed as cross-runtime race coverage.
-
-`python3 -I scripts/check-retained-host-mutations.py <host-checkout>` verifies that
-the retained audit regressions reject mutations restoring response-body capture
-in error-only mode and uncancellable pooled Home submission. It uses disposable
-overlays and does not edit host source files.

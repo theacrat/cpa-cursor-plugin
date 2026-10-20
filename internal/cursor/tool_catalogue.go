@@ -5,7 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -35,6 +39,36 @@ func toolCatalogueOwner(req pluginapi.ExecutorRequest) string {
 	raw, _ := json.Marshal([]string{req.AuthProvider, req.AuthID, req.Model, caller, session})
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
+}
+
+func singleIdentityHeader(headers http.Header, name string) string {
+	var values []string
+	for key, list := range headers {
+		if strings.EqualFold(key, name) {
+			values = append(values, list...)
+		}
+	}
+	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > 256 || !utf8.ValidString(values[0]) {
+		return ""
+	}
+	value := values[0]
+	if strings.TrimSpace(value) != value {
+		return ""
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ""
+		}
+	}
+	return value
+}
+
+func toolResultContinuation(payload []byte) bool {
+	var chat chatRequest
+	if json.Unmarshal(payload, &chat) != nil || len(chat.Messages) == 0 {
+		return false
+	}
+	return chat.Messages[len(chat.Messages)-1].Role == "tool"
 }
 
 func (s *toolCatalogueStore) remember(req pluginapi.ExecutorRequest) {

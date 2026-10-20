@@ -30,8 +30,6 @@ type Executor struct {
 	modelMu        sync.Mutex
 	modelSnapshots map[string]modelSnapshot
 	catalogue      *toolCatalogueStore
-	liveMu         sync.Mutex
-	live           map[string]*liveSession
 	// Log receives one diagnostic line per completed run; nil disables it.
 	// It carries timings and byte counts only, never credentials or bodies.
 	Log func(string)
@@ -87,21 +85,6 @@ func (e *Executor) Close() {
 		cancel()
 	}
 	e.mu.Unlock()
-	e.liveMu.Lock()
-	sessions := make([]*liveSession, 0, len(e.live))
-	for _, session := range e.live {
-		sessions = append(sessions, session)
-	}
-	clear(e.live)
-	e.liveMu.Unlock()
-	for _, session := range sessions {
-		session.cancel()
-	}
-	for _, session := range sessions {
-		session.mu.Lock()
-		session.close()
-		session.mu.Unlock()
-	}
 	e.wg.Wait()
 	e.modelMu.Lock()
 	clear(e.modelSnapshots)
@@ -139,10 +122,6 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
-	req, err = e.repairLiveReplay(req)
-	if err != nil {
-		return pluginapi.ExecutorResponse{}, err
-	}
 	built, err := buildRequest(req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
@@ -177,11 +156,6 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 	}
 	req.Model = variant
 	req, err = e.catalogue.restore(req)
-	if err != nil {
-		release()
-		return pluginapi.ExecutorStreamResponse{}, err
-	}
-	req, err = e.repairLiveReplay(req)
 	if err != nil {
 		release()
 		return pluginapi.ExecutorStreamResponse{}, err

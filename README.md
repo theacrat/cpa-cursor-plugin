@@ -8,10 +8,10 @@ The plugin owns Cursor login, auth-file parsing, model discovery and inference. 
 
 CLIProxyAPI v7.3.20 or newer is required for cancellable host HTTP operations. Cursor's CLI protocol is private and may change independently of CPA; the reference client version is `cli-2026.10.01-e373342`. Cursor does not offer a public standalone chat-completions endpoint. See [the design](docs/design.md) for protocol sources and verification boundaries.
 
-Live tool continuation additionally requires the retained HTTP host extension and
-the provider hook's `x-cpa-request-kind` header. Stock CPA v8.0.29 does not expose
-this extension. Unsupported hosts, missing identities and non-chat-completions
-protocols retain validated stateless execution.
+Tool continuation uses the standard request-scoped CPA host transport. Missing
+tool declarations on a tool-result continuation are restored only from the
+authenticated session's bounded catalogue. New user turns always use their own
+request catalogue.
 
 ## Installation
 
@@ -149,22 +149,6 @@ Cursor filesystem, shell, network or subagent execution. Caller-provided functio
 tools are advertised through the `cpa` MCP server. Native tool requests are rejected
 without performing the operation, with schema guidance for the actual client entries.
 Repeated disabled-tool requests are bounded rather than silently retried forever.
-
-On a compatible host, primary chat-completions requests retain one upstream run
-between client tool rounds. Calls are collected until 250 ms after the latest
-call. Only a complete, owned result batch can resume the pending executions.
-The actual OpenCode session, authenticated caller and selected account own the
-run. Model, system-instruction and catalogue changes prevent reuse. Titles,
-compaction, generate requests and shared affinity headers cannot claim that run.
-
-Parking is committed by CPA only after it successfully writes and flushes the
-terminal tool-call response. Interruptions and failed delivery close the scope.
-There are at most 24 retained runs and 256 MiB of retained blobs, with the existing
-64 MiB per-run limit. Abandoned parked runs expire after one hour. Dead streams
-can recover from validated complete history without executing client tools again,
-with finite phase budgets and recovery limits. See the
-[live-loop specification](docs/live-tool-loop-spec.md) and
-[retained HTTP contract](docs/retained-http-contract.md).
 
 Summaries retain complete history before the final user summary prompt after a
 model switch, without exposing tools absent from the current catalogue. HTTP

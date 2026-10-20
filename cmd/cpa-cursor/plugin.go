@@ -14,18 +14,17 @@ import (
 const pluginIdentifier = "cpa-cursor"
 
 type Plugin struct {
-	mu           sync.Mutex
-	shutdown     bool
-	quiesced     bool
-	cfg          cursor.Config
-	auth         *cursor.AuthService
-	executor     *cursor.Executor
-	quota        *cursor.QuotaService
-	ctx          context.Context
-	cancel       context.CancelFunc
-	workers      sync.WaitGroup
-	hostWorkers  sync.WaitGroup
-	retainedHTTP bool
+	mu          sync.Mutex
+	shutdown    bool
+	quiesced    bool
+	cfg         cursor.Config
+	auth        *cursor.AuthService
+	executor    *cursor.Executor
+	quota       *cursor.QuotaService
+	ctx         context.Context
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
+	hostWorkers sync.WaitGroup
 }
 
 func NewPlugin() *Plugin {
@@ -38,12 +37,7 @@ func NewPlugin() *Plugin {
 
 func (p *Plugin) ApplyLifecycle(raw []byte) error {
 	var req struct {
-		ConfigYAML       []byte `json:"config_yaml"`
-		HostCapabilities struct {
-			RetainedHTTP struct {
-				Version int `json:"version"`
-			} `json:"retained_http"`
-		} `json:"host_capabilities"`
+		ConfigYAML []byte `json:"config_yaml"`
 	}
 	if len(raw) > 0 && json.Unmarshal(raw, &req) != nil {
 		return errors.New("invalid lifecycle request")
@@ -64,7 +58,6 @@ func (p *Plugin) ApplyLifecycle(raw []byte) error {
 	p.hostWorkers.Wait()
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.cfg = cfg
-	p.retainedHTTP = req.HostCapabilities.RetainedHTTP.Version == 1
 	p.auth = cursor.NewAuthService(cfg)
 	p.executor = cursor.NewExecutor(cfg)
 	p.executor.Log = func(message string) { hostLog("debug", message) }
@@ -114,7 +107,7 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 	if len(raw) > 0 && json.Unmarshal(raw, &wire) != nil {
 		return nil, errors.New("invalid request JSON")
 	}
-	client := hostHTTP{callbackID: wire.CallbackID, workers: &p.hostWorkers, retained: p.retainedHTTP}
+	client := hostHTTP{callbackID: wire.CallbackID, workers: &p.hostWorkers}
 	switch method {
 	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return map[string]string{"identifier": "cursor"}, nil
@@ -193,8 +186,6 @@ func (p *Plugin) dispatch(method string, raw []byte) (any, error) {
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, errors.New("invalid executor request")
 		}
-		eligible, _ := req.Metadata["retained_http_eligible"].(bool)
-		client.retained = client.retained && eligible
 		req.HTTPClient = client
 		if method == pluginabi.MethodExecutorCountTokens {
 			return p.executor.CountTokens(ctx, req)

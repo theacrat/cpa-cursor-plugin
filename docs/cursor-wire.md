@@ -32,26 +32,11 @@ the current tool catalogue is empty, disabled or different. Assistant prefills a
 incomplete tool exchanges remain rejected. The current `requested_model`
 field is used without legacy model_details or custom_system_prompt.
 
-On hosts without retained HTTP support, MCP execution yields OpenAI `tool_calls`
-and closes the upstream run immediately. The caller executes the tool, supplies
-its result in the next request, and the executor republishes it in both turn state
-and root prompts. This stateless fallback returns one MCP call per run.
-
-With negotiated retained HTTP version 1, primary requests at
-`/v1/chat/completions` collect a 250 ms burst and prepare the host scope for parking.
-The host commits only at successful terminal response write/flush. The plugin keeps
-the actual RunSSE transport and BidiAppend sequence for the following tool result
-request. Stored public IDs map each result to its exact upstream execution ID pair.
-The complete newest batch is validated before any append. Full-history replay
-never resends old completed results into a pending execution. A missing final
-assistant call list can be restored only from the existing owned pending batch.
-
-The actual OpenCode session and host-derived caller/account scope own retained
-state. Model, credential, system rules and exact original client catalogue are
-compatibility boundaries. Shared affinity and parent headers do not identify a
-live run. Missing identity/purpose, non-primary requests and unverified client
-protocols remain stateless. A new user instruction retires pending work and starts
-from the completed caller history.
+MCP execution yields OpenAI `tool_calls` and closes the upstream run. The caller
+executes the tool and supplies its result in the next request. The executor
+republishes that result in both turn state and root prompts. A tool-result
+continuation may restore its authenticated session's bounded catalogue when the
+client omits `tools`. A new user instruction never inherits that catalogue.
 
 Native
 filesystem, shell and subagent exec requests get typed rejection/error replies with
@@ -88,9 +73,7 @@ skill text, paths and URLs are excluded. Diagnostics do not alter dispatch,
 unwrap dynamic payloads or retry tools.
 
 Frames and decompressed messages are limited to 16 MiB, blob stores to 64 MiB
-and 8192 entries. Retained runs are limited to 24 with a 256 MiB global retained
-blob budget. Parked runs expire after one hour without requiring another request.
-Missing blobs fail rather than silently erase history.
+and 8192 entries. Missing blobs fail rather than silently erase history.
 Active inference and discovery calls share bounded concurrency and deadlines;
 Close cancels admission and waits for active work. Exact token counting and
 arbitrary HTTP forwarding are unsupported. Usage contains only upstream token
@@ -100,15 +83,5 @@ are rejected. Inline base64 image data URIs are supported.
 
 Deterministic local HTTP/2 TLS tests verify duplex KV exchanges, context and
 native rejection, text/thinking/tokens, tool continuation, gzip and fragmented
-frames, cancellation and drain. Host fixtures verify official route/body/ID/
-sequence semantics. These are protocol fixture checks, not a real-account
-end-to-end claim.
-
-Retained fixtures additionally verify multiple tool rounds on one Run, full skill
-results and actual errors, late-call batching, omitted-call ownership, deterministic
-expiry, cancellation during acquisition, shutdown, admission pressure and bounded
-recovery. Recovery uses complete validated caller history, not an unverified
-checkpoint. It retains the absolute step deadline, refuses permission/quota errors
-and divergent output, suppresses already streamed prefixes, and allows at most
-three recoveries with one after visible text. The local fixtures do not establish
-live upstream compatibility or production deployment.
+frames, cancellation and drain. These are protocol fixture checks, not a
+real-account end-to-end claim.

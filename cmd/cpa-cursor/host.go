@@ -29,7 +29,6 @@ var callHost = func(string, any) (json.RawMessage, error) {
 type hostHTTP struct {
 	callbackID string
 	workers    *sync.WaitGroup
-	retained   bool
 	scopeID    string
 }
 
