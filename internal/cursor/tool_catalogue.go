@@ -65,14 +65,6 @@ func singleIdentityHeader(headers http.Header, name string) string {
 	return value
 }
 
-func toolResultContinuation(payload []byte) bool {
-	var chat chatRequest
-	if json.Unmarshal(payload, &chat) != nil || len(chat.Messages) == 0 {
-		return false
-	}
-	return chat.Messages[len(chat.Messages)-1].Role == "tool"
-}
-
 func (s *toolCatalogueStore) remember(req pluginapi.ExecutorRequest) {
 	owner := toolCatalogueOwner(req)
 	if owner == "" {
@@ -109,7 +101,7 @@ func (s *toolCatalogueStore) remember(req pluginapi.ExecutorRequest) {
 }
 
 func (s *toolCatalogueStore) restore(req pluginapi.ExecutorRequest) (pluginapi.ExecutorRequest, error) {
-	if !toolResultContinuation(req.Payload) || toolCatalogueOwner(req) == "" {
+	if toolCatalogueOwner(req) == "" {
 		return req, nil
 	}
 	var fields map[string]json.RawMessage

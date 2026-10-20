@@ -80,7 +80,7 @@ func TestStatelessOmittedToolsContinuationKeepsExecutableCatalogue(t *testing.T)
 	}
 }
 
-func TestStatelessNewUserTurnDoesNotReuseStoredCatalogue(t *testing.T) {
+func TestStatelessNewUserTurnRestoresOmittedCatalogue(t *testing.T) {
 	var n atomic.Int32
 	_, e := tlsFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		readClient(t, r.Body)
@@ -124,8 +124,8 @@ func TestStatelessNewUserTurnDoesNotReuseStoredCatalogue(t *testing.T) {
 	if err := json.Unmarshal(second.Payload, &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Choices) != 1 || len(body.Choices[0].Message.ToolCalls) != 0 {
-		t.Fatalf("new user turn reused a stored catalogue: %s", second.Payload)
+	if len(body.Choices) != 1 || len(body.Choices[0].Message.ToolCalls) != 1 || body.Choices[0].Message.ToolCalls[0].Function.Name != "lookup" {
+		t.Fatalf("new user turn lost the stored catalogue: %s", second.Payload)
 	}
 }
 
