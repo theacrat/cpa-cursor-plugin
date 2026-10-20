@@ -89,9 +89,15 @@ func (s *toolCatalogueStore) remember(req pluginapi.ExecutorRequest) {
 	if s.entries == nil {
 		s.entries = make(map[string]toolCatalogueEntry)
 	}
-	if _, exists := s.entries[owner]; !exists {
-		s.order = append(s.order, owner)
+	if _, exists := s.entries[owner]; exists {
+		for index, key := range s.order {
+			if key == owner {
+				s.order = append(s.order[:index], s.order[index+1:]...)
+				break
+			}
+		}
 	}
+	s.order = append(s.order, owner)
 	s.entries[owner] = toolCatalogueEntry{key: owner, tools: raw}
 	for len(s.order) > toolCatalogueLimit {
 		oldest := s.order[0]
@@ -108,8 +114,8 @@ func (s *toolCatalogueStore) restore(req pluginapi.ExecutorRequest) (pluginapi.E
 	if json.Unmarshal(req.Payload, &fields) != nil {
 		return req, errors.New("invalid Cursor chat-completions payload")
 	}
-	tools, exists := fields["tools"]
-	if exists && string(tools) != "null" && string(tools) != "[]" {
+	_, exists := fields["tools"]
+	if exists {
 		return req, nil
 	}
 	owner := toolCatalogueOwner(req)

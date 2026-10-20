@@ -133,3 +133,27 @@ func TestStatelessNewUserTurnDoesNotReuseStoredCatalogue(t *testing.T) {
 		}
 	}
 }
+
+func TestStatelessExplicitToolCatalogueIsAuthoritative(t *testing.T) {
+	store := newToolCatalogueStore()
+	first := catalogueRequest()
+	store.remember(first)
+	for _, tools := range []string{`[]`, `null`} {
+		req := catalogueRequest()
+		req.Payload, _ = json.Marshal(map[string]any{
+			"messages": []chatMessage{{Role: "tool", ToolCallID: "call-one", Content: json.RawMessage(`"result"`)}},
+			"tools":    json.RawMessage(tools),
+		})
+		restored, err := store.restore(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(restored.Payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if string(fields["tools"]) != tools {
+			t.Fatalf("explicit tools %s was replaced with %s", tools, fields["tools"])
+		}
+	}
+}
