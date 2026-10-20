@@ -9,24 +9,29 @@ import (
 
 const maxRejectedToolCalls = 8
 
+func clientToolQualifiedName(name string) string {
+	return "mcp_" + toolProvider + "_" + name
+}
+
 func clientToolAliases(wire string) []string {
-	return []string{wire, "mcp_" + toolProvider + "_" + wire, toolProvider + "-" + wire, toolProvider + "-mcp_" + toolProvider + "_" + wire}
+	qualified := clientToolQualifiedName(wire)
+	return []string{wire, qualified, toolProvider + "-" + wire, toolProvider + "-" + qualified}
 }
 
 func advertisedClientTools(tools []*pb.McpToolDefinition) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
-		names = append(names, "mcp_"+toolProvider+"_"+tool.Name)
+		names = append(names, clientToolQualifiedName(tool.Name))
 	}
 	return names
 }
 
 func clientToolPolicy(tools []*pb.McpToolDefinition) string {
-	policy := "Native Cursor filesystem, shell, computer, network and subagent operations are disabled in this bridge. Do not call or retry native operations. A native failure does not mean the registered client tools are unavailable. "
+	policy := "Native Cursor filesystem, shell, computer, network and subagent operations are disabled. Do not call or retry native operations. "
 	if len(tools) == 0 {
-		return policy + "No client tools are exposed for this request. Do not discover, invent or call tools. Answer using the supplied conversation only."
+		return policy + "No client tools are available for this request. Answer using the supplied conversation only."
 	}
-	return policy + "The executable client MCP server is cpa. Its registered entries are: " + strings.Join(advertisedClientTools(tools), ", ") + ". Use the MCP catalogue and call these exact registered entries with arguments matching their schemas. GetDynamicTools and CallDynamicTool are Cursor catalogue controls, not OpenCode client tools. Do not call a client tool name as a native Cursor operation. Do not guess tool namespaces or copy native arguments into a different schema."
+	return policy + "Available client tools for this request: " + strings.Join(advertisedClientTools(tools), ", ") + ". Treat this list as authoritative for this request. If a tool call shows an actual name or schema mismatch, report it specifically once and stop. Do not guess or retry with a different name. Otherwise, call a matching tool directly when useful and continue from its actual result."
 }
 
 func clientRequestContext(tools []*pb.McpToolDefinition) *pb.RequestContext {

@@ -271,7 +271,7 @@ func execReply(exec *pb.ExecServerMessage, tools []*pb.McpToolDefinition) (*pb.A
 		advertised := make([]*pb.McpToolDefinition, 0, len(tools))
 		for _, tool := range tools {
 			copy := proto.Clone(tool).(*pb.McpToolDefinition)
-			copy.ToolName = "mcp_" + toolProvider + "_" + tool.Name
+			copy.ToolName = clientToolQualifiedName(tool.Name)
 			advertised = append(advertised, copy)
 		}
 		servers := []*pb.McpStateServer{}

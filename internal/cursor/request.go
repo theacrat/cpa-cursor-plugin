@@ -252,7 +252,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				return nil, errors.New("invalid tool schema")
 			}
 			js, _ := json.Marshal(schema)
-			b.tools = append(b.tools, &pb.McpToolDefinition{Name: b.wire[t.Function.Name], ToolName: b.wire[t.Function.Name], ProviderIdentifier: toolProvider, Description: t.Function.Description, InputSchema: v, InputSchemaJson: proto.String(string(js))})
+			b.tools = append(b.tools, &pb.McpToolDefinition{Name: b.wire[t.Function.Name], ToolName: clientToolQualifiedName(b.wire[t.Function.Name]), ProviderIdentifier: toolProvider, Description: t.Function.Description, InputSchema: v, InputSchemaJson: proto.String(string(js))})
 		}
 	}
 	last := chat.Messages[len(chat.Messages)-1]
@@ -380,7 +380,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				callNames[tc.ID] = wire
 				mc := &pb.McpToolCall{Args: &pb.McpArgs{Name: wire, ToolName: wire, ProviderIdentifier: toolProvider, ToolCallId: tc.ID, Args: encoded}}
 				calls[tc.ID] = mc
-				parts = append(parts, map[string]any{"type": "tool-call", "toolCallId": tc.ID, "toolName": "mcp_" + toolProvider + "_" + wire, "args": args})
+				parts = append(parts, map[string]any{"type": "tool-call", "toolCallId": tc.ID, "toolName": clientToolQualifiedName(wire), "args": args})
 			}
 			if len(parts) > 0 {
 				if err := addRoot(map[string]any{"role": "assistant", "content": parts}); err != nil {
@@ -406,7 +406,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 				return nil, err
 			}
 			current.Steps = append(current.Steps, id)
-			if err := addRoot(map[string]any{"role": "tool", "content": []any{map[string]any{"type": "tool-result", "toolCallId": m.ToolCallID, "toolName": "mcp_" + toolProvider + "_" + callNames[m.ToolCallID], "result": text, "isError": m.IsError}}}); err != nil {
+			if err := addRoot(map[string]any{"role": "tool", "content": []any{map[string]any{"type": "tool-result", "toolCallId": m.ToolCallID, "toolName": clientToolQualifiedName(callNames[m.ToolCallID]), "result": text, "isError": m.IsError}}}); err != nil {
 				return nil, err
 			}
 			delete(calls, m.ToolCallID)

@@ -43,6 +43,55 @@ func TestToolPolicyListsOnlyAdvertisedClientNames(t *testing.T) {
 	}
 }
 
+func TestToolPolicyReportsRealMismatchesWithoutGuessing(t *testing.T) {
+	b, err := buildRequest(clientToolsRequest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := clientToolPolicy(b.tools)
+	for _, phrase := range []string{
+		"Treat this list as authoritative for this request.",
+		"If a tool call shows an actual name or schema mismatch, report it specifically once and stop.",
+		"Do not guess or retry with a different name.",
+		"Otherwise, call a matching tool directly when useful and continue from its actual result.",
+	} {
+		if !strings.Contains(policy, phrase) {
+			t.Fatalf("tool policy omits direct-use guidance %q", phrase)
+		}
+	}
+	for _, phrase := range []string{"Do not narrate", "Do not report", "Do not mention"} {
+		if strings.Contains(policy, phrase) {
+			t.Fatalf("tool policy suppresses a real issue with %q", phrase)
+		}
+	}
+}
+
+func TestToolNamesStayStableAcrossInitialAndLiveCatalogues(t *testing.T) {
+	b, err := buildRequest(clientToolsRequest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := b.message.GetRunRequest()
+	initial := run.GetMcpTools().GetMcpTools()
+	context := run.Action.GetUserMessageAction().RequestContext.Tools
+	stateReply, err := execReply(&pb.ExecServerMessage{Message: &pb.ExecServerMessage_McpStateExecArgs{McpStateExecArgs: &pb.McpStateExecArgs{}}}, b.tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := stateReply.GetExecClientMessage().GetMcpStateExecResult().GetSuccess().Servers[0].Tools
+	for _, catalogue := range [][]*pb.McpToolDefinition{initial, context, live} {
+		if len(catalogue) != len(b.tools) {
+			t.Fatalf("catalogue has %d tools, want %d", len(catalogue), len(b.tools))
+		}
+		for index, tool := range catalogue {
+			want := "mcp_" + toolProvider + "_" + b.tools[index].Name
+			if tool.Name != b.tools[index].Name || tool.ToolName != want {
+				t.Errorf("catalogue tool = (%q, %q), want (%q, %q)", tool.Name, tool.ToolName, b.tools[index].Name, want)
+			}
+		}
+	}
+}
+
 func TestToolFreePolicyDoesNotClaimRegisteredClientTools(t *testing.T) {
 	req := testRequest()
 	req.Payload = []byte(`{"messages":[{"role":"user","content":"summarise"}],"tool_choice":"none","tools":[{"type":"function","function":{"name":"read"}}]}`)
