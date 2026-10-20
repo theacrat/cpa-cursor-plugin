@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -19,7 +20,7 @@ func catalogueRequest() pluginapi.ExecutorRequest {
 	req.AuthID = "account"
 	req.AuthProvider = "cursor"
 	req.Headers = http.Header{"X-Opencode-Session-Id": {"catalogue-session"}}
-	req.Metadata = map[string]any{"caller_scope": "catalogue-caller", "request_path": "/v1/chat/completions"}
+	req.Metadata = map[string]any{"caller_scope": strings.Repeat("a", 64), "request_path": "/v1/chat/completions"}
 	return req
 }
 
@@ -113,24 +114,18 @@ func TestStatelessNewUserTurnDoesNotReuseStoredCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if json.Valid(second.Payload) && json.Unmarshal(second.Payload, new(struct {
+	var body struct {
 		Choices []struct {
 			Message struct {
 				ToolCalls []toolCall `json:"tool_calls"`
 			}
 		}
-	})) == nil {
-		var body struct {
-			Choices []struct {
-				Message struct {
-					ToolCalls []toolCall `json:"tool_calls"`
-				}
-			}
-		}
-		_ = json.Unmarshal(second.Payload, &body)
-		if len(body.Choices) > 0 && len(body.Choices[0].Message.ToolCalls) > 0 {
-			t.Fatalf("new user turn reused a stored catalogue: %s", second.Payload)
-		}
+	}
+	if err := json.Unmarshal(second.Payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Choices) != 1 || len(body.Choices[0].Message.ToolCalls) != 0 {
+		t.Fatalf("new user turn reused a stored catalogue: %s", second.Payload)
 	}
 }
 

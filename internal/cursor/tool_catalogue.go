@@ -17,7 +17,6 @@ import (
 const toolCatalogueLimit = 256
 
 type toolCatalogueEntry struct {
-	key   string
 	tools json.RawMessage
 }
 
@@ -33,7 +32,10 @@ func toolCatalogueOwner(req pluginapi.ExecutorRequest) string {
 	}
 	session := singleIdentityHeader(req.Headers, "X-Opencode-Session-Id")
 	caller, _ := req.Metadata["caller_scope"].(string)
-	if session == "" || caller == "" {
+	if session == "" || len(caller) != 64 {
+		return ""
+	}
+	if _, err := hex.DecodeString(caller); err != nil {
 		return ""
 	}
 	raw, _ := json.Marshal([]string{req.AuthProvider, req.AuthID, req.Model, caller, session})
@@ -98,7 +100,7 @@ func (s *toolCatalogueStore) remember(req pluginapi.ExecutorRequest) {
 		}
 	}
 	s.order = append(s.order, owner)
-	s.entries[owner] = toolCatalogueEntry{key: owner, tools: raw}
+	s.entries[owner] = toolCatalogueEntry{tools: raw}
 	for len(s.order) > toolCatalogueLimit {
 		oldest := s.order[0]
 		s.order = s.order[1:]
