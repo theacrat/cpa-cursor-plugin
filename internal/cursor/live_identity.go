@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -83,12 +84,21 @@ func liveCompatibility(req pluginapi.ExecutorRequest, b *builtRequest) string {
 	return hex.EncodeToString(digest[:])
 }
 
-type pbToolFingerprint struct{ Name, Original, Description, Schema string }
+type pbToolFingerprint struct{ Name, Description, Schema string }
 
 func toolFingerprints(b *builtRequest) []*pbToolFingerprint {
 	tools := make([]*pbToolFingerprint, 0, len(b.tools))
 	for _, tool := range b.tools {
-		tools = append(tools, &pbToolFingerprint{Name: tool.Name, Original: b.resolve[tool.Name], Description: tool.Description, Schema: tool.GetInputSchemaJson()})
+		tools = append(tools, &pbToolFingerprint{Name: tool.Name, Description: tool.Description, Schema: tool.GetInputSchemaJson()})
 	}
+	sort.Slice(tools, func(i, j int) bool {
+		if tools[i].Name != tools[j].Name {
+			return tools[i].Name < tools[j].Name
+		}
+		if tools[i].Description != tools[j].Description {
+			return tools[i].Description < tools[j].Description
+		}
+		return tools[i].Schema < tools[j].Schema
+	})
 	return tools
 }

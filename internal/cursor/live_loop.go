@@ -315,6 +315,38 @@ func (e *Executor) runLive(ctx context.Context, req pluginapi.ExecutorRequest, b
 	return combined, errors.New("Cursor recovery limit exceeded")
 }
 
+func (e *Executor) restoreParkedCatalogue(req pluginapi.ExecutorRequest, b *builtRequest) {
+	if len(b.tools) > 0 || !toolResultContinuation(req.Payload) {
+		return
+	}
+	owner := liveOwner(req)
+	if owner == "" {
+		return
+	}
+	e.liveMu.Lock()
+	session := e.live[owner]
+	if session == nil || !session.mu.TryLock() {
+		e.liveMu.Unlock()
+		return
+	}
+	e.liveMu.Unlock()
+	defer session.mu.Unlock()
+	if session.closed || !session.parked || session.built == nil || len(session.built.tools) == 0 {
+		return
+	}
+	b.tools = session.built.tools
+	b.wire = session.built.wire
+	b.resolve = session.built.resolve
+}
+
+func toolResultContinuation(payload []byte) bool {
+	var chat chatRequest
+	if json.Unmarshal(payload, &chat) != nil || len(chat.Messages) == 0 {
+		return false
+	}
+	return chat.Messages[len(chat.Messages)-1].Role == "tool"
+}
+
 func (e *Executor) runLiveAttempt(ctx context.Context, req pluginapi.ExecutorRequest, b *builtRequest, onText func(string, bool) error, tableTook time.Duration, host RetainedHTTPHost, progress *liveProgress) (result runResult, err error) {
 	session, resume, err := e.liveSession(ctx, req, b, host)
 	if err != nil {

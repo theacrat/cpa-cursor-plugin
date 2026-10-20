@@ -77,7 +77,7 @@ func TestLiveToolLoopCallerAccountAndCredentialCompatibilityAreIsolated(t *testi
 	}
 }
 
-func TestLiveToolLoopCompatibilityIncludesOriginalFunctionNames(t *testing.T) {
+func TestLiveToolLoopCompatibilityCanonicalisesQualifiedFunctionAliases(t *testing.T) {
 	first := testRequest()
 	first.Payload = []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)
 	second := first
@@ -90,8 +90,8 @@ func TestLiveToolLoopCompatibilityIncludesOriginalFunctionNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if liveCompatibility(first, a) == liveCompatibility(second, b) {
-		t.Fatal("different original client functions share retained compatibility")
+	if liveCompatibility(first, a) != liveCompatibility(second, b) {
+		t.Fatal("qualified and unqualified client aliases lost retained compatibility")
 	}
 }
 

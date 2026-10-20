@@ -3,6 +3,7 @@ package cursor
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -52,6 +53,50 @@ func TestLiveToolLoopToolFreePrimaryDoesNotConsumeParkedCodingRun(t *testing.T) 
 		scope.mu.Unlock()
 		if original == nil || remaining != original || closed || attaches != 0 {
 			t.Fatal("tool-free request consumed a parked coding run")
+		}
+	})
+}
+
+func TestLiveToolLoopToolResultContinuationKeepsParkedCatalogueWhenToolsOmitted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := &liveFixtureScope{chunks: make(chan pluginapi.HTTPStreamChunk, 8)}
+		host := &liveFixtureHost{scope: scope}
+		e := NewExecutor(DefaultConfig())
+		warmFixtureVariants(e)
+		defer e.Close()
+		req := liveRequest(host)
+		first, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Choices []struct{ Message chatMessage }
+		}
+		if err := json.Unmarshal(first.Payload, &body); err != nil || len(body.Choices) != 1 || len(body.Choices[0].Message.ToolCalls) != 1 {
+			t.Fatal("missing client tool call")
+		}
+		message := body.Choices[0].Message
+		message.Content = json.RawMessage(`null`)
+		callID := message.ToolCalls[0].ID
+		req.Payload, _ = json.Marshal(map[string]any{
+			"messages": []chatMessage{
+				{Role: "system", Content: json.RawMessage(`"Be brief"`)},
+				{Role: "user", Content: json.RawMessage(`"Hello"`)},
+				message,
+				{Role: "tool", ToolCallID: callID, Content: json.RawMessage(`"actual result"`)},
+			},
+		})
+		second, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(second.Payload), "continued after actual result") {
+			t.Fatal("result did not resume upstream")
+		}
+		scope.mu.Lock()
+		defer scope.mu.Unlock()
+		if scope.runs != 1 || scope.results != 1 || scope.parks != 1 || scope.attaches != 1 {
+			t.Fatalf("live run lifecycle runs=%d results=%d parks=%d attaches=%d", scope.runs, scope.results, scope.parks, scope.attaches)
 		}
 	})
 }
