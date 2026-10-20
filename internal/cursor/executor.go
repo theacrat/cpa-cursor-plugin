@@ -29,6 +29,7 @@ type Executor struct {
 	variantFetches map[string]*variantFetch
 	modelMu        sync.Mutex
 	modelSnapshots map[string]modelSnapshot
+	catalogue      *toolCatalogueStore
 	liveMu         sync.Mutex
 	live           map[string]*liveSession
 	// Log receives one diagnostic line per completed run; nil disables it.
@@ -45,7 +46,7 @@ func NewExecutor(cfg Config) *Executor {
 	if err != nil {
 		n = 1
 	}
-	return &Executor{cfg: cfg, configErr: err, active: make(map[uint64]context.CancelFunc), slots: make(chan struct{}, n)}
+	return &Executor{cfg: cfg, configErr: err, active: make(map[uint64]context.CancelFunc), slots: make(chan struct{}, n), catalogue: newToolCatalogueStore()}
 }
 
 func (e *Executor) lease(ctx context.Context) (context.Context, func(), error) {
@@ -105,6 +106,7 @@ func (e *Executor) Close() {
 	e.modelMu.Lock()
 	clear(e.modelSnapshots)
 	e.modelMu.Unlock()
+	e.catalogue.clear()
 }
 
 func executorToken(storage []byte, metadata map[string]any) (string, error) {
@@ -133,6 +135,10 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 		return pluginapi.ExecutorResponse{}, err
 	}
 	req.Model = variant
+	req, err = e.catalogue.restore(req)
+	if err != nil {
+		return pluginapi.ExecutorResponse{}, err
+	}
 	req, err = e.repairLiveReplay(req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
@@ -142,6 +148,7 @@ func (e *Executor) Execute(ctx context.Context, req pluginapi.ExecutorRequest) (
 		return pluginapi.ExecutorResponse{}, err
 	}
 	result, err := e.run(ctx, req, built, nil, tableTook)
+	e.catalogue.remember(req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
 	}
@@ -169,6 +176,11 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 		return pluginapi.ExecutorStreamResponse{}, err
 	}
 	req.Model = variant
+	req, err = e.catalogue.restore(req)
+	if err != nil {
+		release()
+		return pluginapi.ExecutorStreamResponse{}, err
+	}
 	req, err = e.repairLiveReplay(req)
 	if err != nil {
 		release()
@@ -222,6 +234,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req pluginapi.ExecutorRequ
 			}
 			return emit(map[string]any{key: text}, nil, nil)
 		}, tableTook)
+		e.catalogue.remember(req)
 		if err != nil {
 			admit(err)
 			_ = send(pluginapi.ExecutorStreamChunk{Err: err})
