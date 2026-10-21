@@ -152,3 +152,55 @@ func TestStatelessExplicitToolCatalogueIsAuthoritative(t *testing.T) {
 		}
 	}
 }
+
+func TestStatelessCatalogueIsolatedAcrossProviderAndModelSwitches(t *testing.T) {
+	store := newToolCatalogueStore()
+	cursorRequest := catalogueRequest()
+	store.remember(cursorRequest)
+
+	for _, switched := range []pluginapi.ExecutorRequest{
+		func() pluginapi.ExecutorRequest {
+			req := catalogueRequest()
+			req.AuthProvider = "grok"
+			req.AuthID = "grok-account"
+			req.Model = "grok-model"
+			req.Payload = []byte(`{"messages":[{"role":"user","content":"continue"}]}`)
+			return req
+		}(),
+		func() pluginapi.ExecutorRequest {
+			req := catalogueRequest()
+			req.Model = "cursor-other-model"
+			req.Payload = []byte(`{"messages":[{"role":"user","content":"continue"}]}`)
+			return req
+		}(),
+	} {
+		restored, err := store.restore(switched)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(restored.Payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := fields["tools"]; exists {
+			t.Fatalf("switched provider or model inherited the Cursor catalogue: %s", restored.Payload)
+		}
+	}
+
+	resumed, err := store.restore(cursorRequestWithPayload(cursorRequest, `{"messages":[{"role":"user","content":"back to cursor"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(resumed.Payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["tools"]; !exists {
+		t.Fatal("returning to Cursor lost its own catalogue")
+	}
+}
+
+func cursorRequestWithPayload(req pluginapi.ExecutorRequest, payload string) pluginapi.ExecutorRequest {
+	req.Payload = []byte(payload)
+	return req
+}
