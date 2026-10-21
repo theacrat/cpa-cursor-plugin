@@ -429,7 +429,7 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 		}
 		action.Action = &pb.ConversationAction_UserMessageAction{UserMessageAction: &pb.UserMessageAction{UserMessage: newUser(text, images, selectedID), RequestContext: context}}
 	}
-	run := &pb.AgentRunRequest{ConversationState: state, Action: action, RequestedModel: &pb.RequestedModel{ModelId: b.model}, ConversationId: proto.String(uuid()), McpTools: &pb.McpTools{McpTools: b.tools}}
+	run := &pb.AgentRunRequest{ConversationState: state, Action: action, RequestedModel: &pb.RequestedModel{ModelId: b.model}, ConversationId: proto.String(uuid()), McpTools: &pb.McpTools{McpTools: b.tools}, McpFileSystemOptions: &pb.McpFileSystemOptions{Enabled: false}, SkillOptions: &pb.SkillOptions{}}
 	run.RequestedModel.MaxMode = chat.MaxMode
 	for _, p := range chat.ModelParameters {
 		if p.ID == "" {

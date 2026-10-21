@@ -41,6 +41,12 @@ func TestToolPolicyListsOnlyAdvertisedClientNames(t *testing.T) {
 	if context.WebSearchEnabled == nil || *context.WebSearchEnabled {
 		t.Fatal("native web-search support was not disabled")
 	}
+	if run.GetMcpFileSystemOptions() == nil || run.GetMcpFileSystemOptions().Enabled {
+		t.Fatal("run-level native filesystem support was not disabled")
+	}
+	if run.GetSkillOptions() == nil || len(run.GetSkillOptions().GetSkillDescriptors()) != 0 {
+		t.Fatal("run-level native skill catalogue was not disabled")
+	}
 }
 
 func TestToolPolicyReportsRealMismatchesWithoutGuessing(t *testing.T) {
