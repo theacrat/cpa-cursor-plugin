@@ -43,13 +43,13 @@ func TestTaskToolUsesCursorSafeBridgeName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if built.wire["task"] != "opencode_task" {
-		t.Fatalf("task wire name = %q, want opencode_task", built.wire["task"])
+	if built.wire["task"] != "client_task" {
+		t.Fatalf("task wire name = %q, want client_task", built.wire["task"])
 	}
-	if built.resolve["mcp_cpa_opencode_task"] != "task" {
-		t.Fatal("bridged task name did not resolve to the OpenCode task tool")
+	if built.resolve["mcp_cpa_client_task"] != "task" {
+		t.Fatal("bridged task name did not resolve to the client task tool")
 	}
-	if built.tools[0].ToolName != "mcp_cpa_opencode_task" {
+	if built.tools[0].ToolName != "mcp_cpa_client_task" {
 		t.Fatalf("advertised task name = %q", built.tools[0].ToolName)
 	}
 }
