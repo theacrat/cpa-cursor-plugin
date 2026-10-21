@@ -35,3 +35,21 @@ func TestToolNamesAndAliasesCannotIdentifyDifferentFunctions(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskToolUsesCursorSafeBridgeName(t *testing.T) {
+	req := testRequest()
+	req.Payload = []byte(`{"messages":[{"role":"user","content":"delegate"}],"tools":[{"type":"function","function":{"name":"task","parameters":{"type":"object"}}}]}`)
+	built, err := buildRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.wire["task"] != "opencode_task" {
+		t.Fatalf("task wire name = %q, want opencode_task", built.wire["task"])
+	}
+	if built.resolve["mcp_cpa_opencode_task"] != "task" {
+		t.Fatal("bridged task name did not resolve to the OpenCode task tool")
+	}
+	if built.tools[0].ToolName != "mcp_cpa_opencode_task" {
+		t.Fatalf("advertised task name = %q", built.tools[0].ToolName)
+	}
+}

@@ -218,6 +218,9 @@ func buildRequest(req pluginapi.ExecutorRequest) (*builtRequest, error) {
 			for strings.HasPrefix(base, "mcp_"+toolProvider+"_") {
 				base = strings.TrimPrefix(base, "mcp_"+toolProvider+"_")
 			}
+			if strings.EqualFold(base, "task") {
+				base = "opencode_task"
+			}
 			if base == "" {
 				base = "tool"
 			}
