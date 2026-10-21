@@ -225,6 +225,12 @@ func (e *Executor) runStateless(ctx context.Context, req pluginapi.ExecutorReque
 				}
 				return done(r, nil)
 			}
+			if exec.GetMcpStateExecArgs() != nil {
+				rejectedTools++
+				if rejectedTools > maxRejectedToolCalls {
+					return done(r, errors.New("Cursor repeatedly requested disabled dynamic MCP discovery; no native operation was performed"))
+				}
+			}
 			if exec.GetRequestContextArgs() == nil && exec.GetMcpStateExecArgs() == nil {
 				rejectedTools++
 				e.logToolRejection(b, exec, rejectedTools, "refused")
@@ -265,17 +271,7 @@ func execReply(exec *pb.ExecServerMessage, tools []*pb.McpToolDefinition) (*pb.A
 	case *pb.ExecServerMessage_RequestContextArgs:
 		reply.Message = &pb.ExecClientMessage_RequestContextResult{RequestContextResult: &pb.RequestContextResult{Result: &pb.RequestContextResult_Success{Success: &pb.RequestContextSuccess{RequestContext: clientRequestContext(tools)}}}}
 	case *pb.ExecServerMessage_McpStateExecArgs:
-		advertised := make([]*pb.McpToolDefinition, 0, len(tools))
-		for _, tool := range tools {
-			copy := proto.Clone(tool).(*pb.McpToolDefinition)
-			copy.ToolName = clientToolQualifiedName(tool.Name)
-			advertised = append(advertised, copy)
-		}
-		servers := []*pb.McpStateServer{}
-		if len(tools) > 0 {
-			servers = append(servers, &pb.McpStateServer{ServerName: toolProvider, ServerIdentifier: toolProvider, Tools: advertised, Instructions: []*pb.McpInstructions{{ServerName: toolProvider, Instructions: clientToolPolicy(tools)}}})
-		}
-		reply.Message = &pb.ExecClientMessage_McpStateExecResult{McpStateExecResult: &pb.McpStateExecResult{Result: &pb.McpStateExecResult_Success{Success: &pb.McpStateSuccess{Servers: servers}}}}
+		reply.Message = &pb.ExecClientMessage_McpStateExecResult{McpStateExecResult: &pb.McpStateExecResult{Result: &pb.McpStateExecResult_Rejected{Rejected: &pb.McpStateRejected{Reason: "Cursor dynamic MCP discovery is disabled. Use the registered cpa client tools from the request catalogue."}}}}
 	default:
 		return refusedNativeExec(exec, tools), nil
 	}

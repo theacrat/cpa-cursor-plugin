@@ -74,12 +74,7 @@ func TestToolNamesStayStableAcrossInitialAndLiveCatalogues(t *testing.T) {
 	run := b.message.GetRunRequest()
 	initial := run.GetMcpTools().GetMcpTools()
 	context := run.Action.GetUserMessageAction().RequestContext.Tools
-	stateReply, err := execReply(&pb.ExecServerMessage{Message: &pb.ExecServerMessage_McpStateExecArgs{McpStateExecArgs: &pb.McpStateExecArgs{}}}, b.tools)
-	if err != nil {
-		t.Fatal(err)
-	}
-	live := stateReply.GetExecClientMessage().GetMcpStateExecResult().GetSuccess().Servers[0].Tools
-	for _, catalogue := range [][]*pb.McpToolDefinition{initial, context, live} {
+	for _, catalogue := range [][]*pb.McpToolDefinition{initial, context} {
 		if len(catalogue) != len(b.tools) {
 			t.Fatalf("catalogue has %d tools, want %d", len(catalogue), len(b.tools))
 		}
@@ -189,7 +184,7 @@ func TestDisabledNativeRetriesStopWithoutForwardingOperations(t *testing.T) {
 	}
 }
 
-func TestMCPStateCatalogueHasExactNamesAndGuidance(t *testing.T) {
+func TestMCPStateCatalogueIsRefused(t *testing.T) {
 	b, err := buildRequest(clientToolsRequest(t))
 	if err != nil {
 		t.Fatal(err)
@@ -198,9 +193,31 @@ func TestMCPStateCatalogueHasExactNamesAndGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	servers := reply.GetExecClientMessage().GetMcpStateExecResult().GetSuccess().Servers
-	if len(servers) != 1 || servers[0].ServerIdentifier != "cpa" || len(servers[0].Instructions) != 1 || servers[0].Tools[0].Name != "read" || servers[0].Tools[0].ToolName != "mcp_cpa_read" {
-		t.Fatal("MCP state catalogue did not preserve client tool identity")
+	result := reply.GetExecClientMessage().GetMcpStateExecResult()
+	if result.GetSuccess() != nil {
+		t.Fatal("MCP state discovery returned a success result")
+	}
+	if reason := result.GetRejected().GetReason(); !strings.Contains(reason, "dynamic MCP discovery is disabled") || !strings.Contains(reason, "cpa client tools") {
+		t.Fatalf("MCP state refusal lacks client-tool guidance: %s", reason)
+	}
+}
+
+func TestRepeatedMCPStateRequestsStopWithoutNativeFallback(t *testing.T) {
+	_, e := tlsFixture(t, func(w http.ResponseWriter, req *http.Request) {
+		readClient(t, req.Body)
+		w.Header().Set("Content-Type", "application/connect+proto")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		for id := uint32(1); id <= maxRejectedToolCalls+1; id++ {
+			writeServer(t, w, &pb.AgentServerMessage{Message: &pb.AgentServerMessage_ExecServerMessage{ExecServerMessage: &pb.ExecServerMessage{Id: id, Message: &pb.ExecServerMessage_McpStateExecArgs{McpStateExecArgs: &pb.McpStateExecArgs{}}}}})
+			if id <= maxRejectedToolCalls && readClient(t, req.Body).GetExecClientMessage().GetMcpStateExecResult().GetRejected() == nil {
+				t.Error("dynamic MCP discovery was not refused")
+			}
+		}
+	})
+	_, err := e.Execute(context.Background(), clientToolsRequest(t))
+	if err == nil || !strings.Contains(err.Error(), "repeatedly requested disabled dynamic MCP discovery") {
+		t.Fatalf("unbounded dynamic MCP discovery: %v", err)
 	}
 }
 
